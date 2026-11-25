@@ -1,0 +1,5 @@
+{
+  "name": "Office Survivor",
+  "description": "A browser-playable office roguelite where you survive an 8-hour workday by completing tasks, dodging meetings, collecting coffee, and defeating deadline bosses.",
+  "requestFramePermissions": []
+}

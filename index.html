@@ -1,109 +1,685 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Office Survivor</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta
+      name="description"
+      content="A 3D Three.js corporate chaos roguelite where you survive a 5-day product launch across Apex Corp Floor 42."
+    />
+    <meta property="og:title" content="Office Survivor" />
+    <meta
+      property="og:description"
+      content="A 3D Three.js corporate chaos roguelite where you survive a 5-day product launch across Apex Corp Floor 42."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
-  <body>
-    <main id="app" aria-label="Office Survivor game">
-      <canvas id="gameCanvas" width="1280" height="720"></canvas>
+  <body data-state="title">
+    <main id="app" class="game-shell" aria-label="Office Survivor 3D game">
+      <!-- Dedicated Three.js WebGL Mount (never touched by HUD updates) -->
+      <div id="canvasMount" class="canvas-mount" data-testid="webgl-mount"></div>
 
-      <section id="hud" class="hud" aria-live="polite">
-        <div class="brand">
-          <span class="logo-mark">OS</span>
-          <div>
-            <h1>Office Survivor</h1>
-            <p id="dayLabel">Monday, Day 1</p>
+      <!-- Projected 3D-to-2D Combat Floaters -->
+      <div id="floaterLayer" class="floater-layer" aria-hidden="true"></div>
+
+      <!-- Critical Low-Energy Peripheral Vignette -->
+      <div id="dangerVignette" class="danger-vignette" aria-hidden="true"></div>
+
+      <!-- PLAYING HUD (Hidden on Title Screen) -->
+      <section id="playingHud" class="hud-layer" aria-live="polite">
+        <!-- Top-Left: Character Portrait, Vitality, Weapon & XP -->
+        <div class="hud-cluster hud-top-left">
+          <div class="hud-hero-wrap">
+            <div id="hudHeroPortrait" class="hud-portrait" aria-hidden="true"></div>
+            <div class="hud-hero-body">
+              <div class="hud-row-between">
+                <div class="hud-identity">
+                  <strong id="hudHeroName">Maya Lin</strong>
+                  <span class="sep" aria-hidden="true">·</span>
+                  <span id="hudHeroLevel" class="mono">Lvl 1</span>
+                </div>
+                <span id="hudEnergyText" class="mono hud-hero-num">105/105</span>
+              </div>
+              <div class="bar-track bar-energy" aria-label="Energy">
+                <span id="hudEnergyGhost" class="bar-ghost"></span>
+                <span id="hudEnergyFill" class="bar-fill"></span>
+              </div>
+              <div class="hud-micro-stats mono">
+                <span id="hudWeaponLabel" class="hud-weapon-label">Hotfix Twin-Burst</span>
+                <span class="sep" aria-hidden="true">·</span>
+                <span>Focus <strong id="hudFocusText">100%</strong></span>
+                <span class="sep" aria-hidden="true">·</span>
+                <span>Prod <strong id="hudProdText">11</strong></span>
+              </div>
+              <div class="bar-track bar-xp" aria-label="Experience">
+                <span id="hudXpFill" class="bar-fill-xp"></span>
+              </div>
+              <div id="hudStatusRow" class="hud-status-row mono" hidden></div>
+            </div>
           </div>
         </div>
 
-        <div class="resource-grid">
-          <div class="meter">
-            <div class="meter-label"><span>Energy</span><strong id="energyText">100/100</strong></div>
-            <div class="track"><span id="energyBar"></span></div>
+        <!-- Top-Center: Workday Clock, Current Room Plate & C-Suite Boss Bar -->
+        <div class="hud-center-stack">
+          <div class="hud-cluster hud-clock-cluster">
+            <div class="hud-clock-row">
+              <span id="hudDayLabel" class="hud-kicker">FL 12 · Mon</span>
+              <strong id="hudClockText" class="mono hud-clock-num">9:00 AM</strong>
+            </div>
+            <div class="hud-sub-row">
+              <span id="hudPhaseText" class="hud-phase">Morning Inbox</span>
+              <span class="sep" aria-hidden="true">·</span>
+              <span id="hudRoomPlate" class="hud-room-plate mono">ATRIUM</span>
+            </div>
           </div>
-          <div class="meter">
-            <div class="meter-label"><span>Focus</span><strong id="focusText">100%</strong></div>
-            <div class="track"><span id="focusBar"></span></div>
-          </div>
-          <div class="meter">
-            <div class="meter-label"><span>Productivity</span><strong id="prodText">10</strong></div>
-            <div class="track"><span id="prodBar"></span></div>
-          </div>
-          <div class="meter">
-            <div class="meter-label"><span>Happiness</span><strong id="happyText">100%</strong></div>
-            <div class="track"><span id="happyBar"></span></div>
+
+          <div id="bossBarWrap" class="hud-cluster boss-bar-wrap" hidden>
+            <div class="boss-bar-inner">
+              <div id="bossPortrait" class="boss-portrait" aria-hidden="true"></div>
+              <div class="boss-bar-body">
+                <div class="hud-row-between">
+                  <strong id="bossNameText">CTO Chad Sterling</strong>
+                  <span id="bossHpText" class="mono">430/430</span>
+                </div>
+                <div class="bar-track bar-boss">
+                  <span id="bossHpFill" class="bar-fill-boss"></span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="right-stack">
-          <div class="clock">
-            <span id="timeText">9:00 AM</span>
-            <strong id="phaseText">Morning inbox</strong>
+        <!-- Top-Right: Salary, Flow & Utility Controls -->
+        <div class="hud-top-right">
+          <div class="hud-cluster hud-salary-cluster">
+            <div class="hud-kicker">Salary</div>
+            <strong id="hudSalaryText" class="mono hud-salary-num">$0</strong>
+            <div id="hudFlowText" class="hud-flow mono" hidden>1.5x Flow</div>
           </div>
-          <div class="salary">
-            <span>Salary</span>
-            <strong id="salaryText">$0</strong>
+          <div class="hud-utilities">
+            <button
+              id="viewModeButton"
+              type="button"
+              class="util-btn util-btn-mode mono"
+              aria-label="Toggle First-Person view"
+              title="Toggle FPS View (V)"
+              tabindex="-1"
+            >
+              3P
+            </button>
+            <button
+              id="muteButton"
+              type="button"
+              class="util-btn"
+              aria-label="Toggle audio mute"
+              title="Mute"
+              tabindex="-1"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path id="soundWaves" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"></path>
+                <line id="soundMuteLine" x1="22" y1="9" x2="16" y2="15" hidden></line>
+              </svg>
+            </button>
+            <button
+              id="pauseButton"
+              type="button"
+              class="util-btn"
+              aria-label="Pause game"
+              title="Pause"
+              tabindex="-1"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <line x1="8" y1="5" x2="8" y2="19"></line>
+                <line x1="16" y1="5" x2="16" y2="19"></line>
+              </svg>
+            </button>
           </div>
         </div>
-      </section>
 
-      <section id="toast" class="toast" aria-live="assertive"></section>
+        <!-- Centered First-Person Crosshair (Visible only in FPS playing mode) -->
+        <div id="fpsCrosshair" class="fps-crosshair" aria-hidden="true" hidden>
+          <span class="xh-tick xh-top"></span>
+          <span class="xh-tick xh-bottom"></span>
+          <span class="xh-tick xh-left"></span>
+          <span class="xh-tick xh-right"></span>
+          <span class="xh-dot"></span>
+        </div>
 
-      <section id="startScreen" class="screen is-open">
-        <div class="menu-panel">
-          <div class="title-row">
+        <!-- Bottom-Left: Live Story Comms Card -->
+        <aside id="commsCard" class="comms-card" aria-live="polite" hidden>
+          <div class="comms-head">
+            <span id="commsAvatar" class="comms-avatar" aria-hidden="true">CS</span>
             <div>
-              <p class="eyebrow">Corporate chaos roguelite</p>
-              <h2>Survive the workday.</h2>
+              <strong id="commsSpeaker">Chad Sterling</strong>
+              <span class="sep" aria-hidden="true">·</span>
+              <span id="commsRole" class="comms-role">CTO</span>
             </div>
-            <span class="stamp">8 hours</span>
           </div>
-          <p class="menu-copy">Complete tasks automatically, dodge meetings, drink coffee, and defeat the Release Deadline before burnout wins.</p>
+          <p id="commsMessage" class="comms-message"></p>
+        </aside>
 
-          <div class="selection">
-            <h3>Choose employee</h3>
-            <div id="classList" class="class-list"></div>
+        <!-- Bottom-Center: Compact Tactical Action Dock (Dodge + Skill + On-Demand Perk Claim) -->
+        <div class="hud-bottom-center">
+          <div class="action-dock">
+            <button
+              id="dodgeSlotButton"
+              type="button"
+              class="skill-slot dodge-slot"
+              aria-label="Trigger dodge roll"
+              tabindex="-1"
+            >
+              <span id="hudDodgeKey" class="skill-key mono">SHIFT</span>
+              <span class="skill-info">
+                <strong>Dodge</strong>
+                <span id="hudDodgeStatus" class="mono">Ready</span>
+              </span>
+              <span class="skill-meter">
+                <span id="hudDodgeFill" class="skill-meter-fill"></span>
+              </span>
+            </button>
+
+            <button
+              id="skillSlotButton"
+              type="button"
+              class="skill-slot"
+              aria-label="Trigger signature skill"
+              tabindex="-1"
+            >
+              <span id="hudSkillKey" class="skill-key mono">SPACE</span>
+              <span class="skill-info">
+                <strong id="hudSkillName">Stack Overflow Surge</strong>
+                <span id="hudSkillStatus" class="mono">Ready</span>
+              </span>
+              <span class="skill-meter">
+                <span id="hudSkillFill" class="skill-meter-fill"></span>
+              </span>
+            </button>
+
+            <button
+              id="claimPerkButton"
+              type="button"
+              class="skill-slot perk-claim-slot"
+              aria-label="Claim queued level-up perk"
+              tabindex="-1"
+              hidden
+            >
+              <span id="hudClaimKey" class="skill-key mono">E</span>
+              <span class="skill-info">
+                <strong id="hudClaimLabel">Perk Ready</strong>
+                <span id="hudClaimCount" class="mono">1 Queued</span>
+              </span>
+            </button>
           </div>
+          <div id="stationHint" class="station-hint" hidden></div>
+        </div>
 
-          <div class="shop">
-            <div class="shop-head">
-              <h3>Permanent upgrades</h3>
-              <strong id="bankText">$0</strong>
+        <!-- Bottom-Right: Live 10-Room Campus Minimap -->
+        <aside id="minimapWrap" class="hud-cluster minimap-wrap" aria-label="Office floorplan minimap">
+          <div class="minimap-head mono">
+            <span id="minimapRoomName">ATRIUM</span>
+            <span id="minimapFloorLabel" class="minimap-floor">FL 12</span>
+          </div>
+          <canvas id="minimapCanvas" width="210" height="162"></canvas>
+        </aside>
+      </section>
+
+      <!-- Transient Toast Notification -->
+      <div id="toastBanner" class="toast-banner" role="status" aria-live="polite"></div>
+
+      <!-- TITLE SCREEN OVERLAY (Left Setup Hub — Right ~62% Open for Interactive 3D Atrium) -->
+      <section id="titleScreen" class="title-screen" aria-label="Start menu">
+        <div class="title-panel">
+          <!-- Custom Inline SVG Architectural Emblem & Title Lockup -->
+          <div class="title-head-row">
+            <svg viewBox="0 0 380 62" class="title-svg" role="img" aria-label="Office Survivor — Apex Corp Tower">
+              <rect x="2" y="7" width="44" height="46" rx="8" fill="#132234" stroke="#28b89d" stroke-width="2.5" />
+              <rect x="17" y="2" width="14" height="9" rx="3" fill="#28b89d" />
+              <rect x="10" y="20" width="28" height="5.5" rx="2" fill="#28b89d" />
+              <rect x="10" y="30" width="20" height="4.5" rx="2" fill="#94a3b8" />
+              <rect x="10" y="39" width="24" height="4.5" rx="2" fill="#f59e0b" />
+              <text x="58" y="33" fill="#f8fafc" font-family="Bricolage Grotesque, sans-serif" font-weight="800" font-size="29" letter-spacing="-0.6">
+                Office Survivor
+              </text>
+              <text x="59" y="51" fill="#94a3b8" font-family="JetBrains Mono, monospace" font-weight="500" font-size="10.2" letter-spacing="0.4">
+                APEX CORP TOWER · 5 FLOORS · 10-ROOM CAMPUS
+              </text>
+            </svg>
+            <div class="title-head-actions">
+              <button
+                id="titleDirectoryButton"
+                type="button"
+                class="icon-action-btn"
+                aria-label="Open Corporate Directory and Floorplan"
+                title="Org Chart &amp; Campus Guide"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="2" width="6" height="5" rx="1"></rect>
+                  <rect x="2" y="16" width="6" height="5" rx="1"></rect>
+                  <rect x="9" y="16" width="6" height="5" rx="1"></rect>
+                  <rect x="16" y="16" width="6" height="5" rx="1"></rect>
+                  <path d="M12 7v4M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3M12 11v5"></path>
+                </svg>
+              </button>
+              <button
+                id="titleSettingsButton"
+                type="button"
+                class="icon-action-btn"
+                aria-label="Open settings"
+                title="Settings"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+              </button>
             </div>
-            <div id="shopList" class="shop-list"></div>
           </div>
 
-          <div class="menu-actions">
-            <button id="startButton" class="primary">Start Workday</button>
-            <button id="resetButton" class="ghost">Reset Save</button>
+          <!-- Segmented Switch: Shift Setup, Office Arsenal & Permanent Upgrades -->
+          <div class="panel-tabs" role="tablist" aria-label="Pre-shift preparation">
+            <button id="tabRoster" type="button" role="tab" aria-selected="true" class="tab-btn is-active">
+              Shift Setup
+            </button>
+            <button id="tabArsenal" type="button" role="tab" aria-selected="false" class="tab-btn">
+              Office Arsenal
+            </button>
+            <button id="tabShop" type="button" role="tab" aria-selected="false" class="tab-btn">
+              Upgrades
+            </button>
+          </div>
+
+          <!-- Shift Setup Tab -->
+          <div id="rosterPane" class="tab-pane">
+            <!-- Day 1-5 Selector + Chapter Brief -->
+            <div class="setup-section">
+              <div class="setup-head-row mono">
+                <span id="titleDayMeta">Day 1 · Monday</span>
+                <span id="titleBankMeta">Bank $0</span>
+              </div>
+              <div id="daySelector" class="day-selector" role="group" aria-label="Select workday"></div>
+              <h2 id="titleChapterName" class="chapter-title">The Onboarding Ambush</h2>
+              <p id="titleChapterBrief" class="chapter-brief"></p>
+            </div>
+
+            <!-- Difficulty Selector -->
+            <div class="setup-section">
+              <div class="setup-head-row">
+                <span class="setup-label">Difficulty</span>
+                <span id="difficultyTagline" class="setup-sub mono">Balanced · 1.0× salary</span>
+              </div>
+              <div id="difficultySelector" class="diff-selector" role="group" aria-label="Select difficulty"></div>
+            </div>
+
+            <!-- Employee Roster + Loadout Dossier -->
+            <div class="setup-section">
+              <div id="classGrid" class="class-grid"></div>
+              <div class="hero-dossier">
+                <div class="dossier-top">
+                  <div id="dossierPortrait" class="dossier-portrait" aria-hidden="true"></div>
+                  <div class="dossier-top-copy">
+                    <div class="dossier-head">
+                      <strong id="dossierName">Maya Lin</strong>
+                      <span class="sep" aria-hidden="true">·</span>
+                      <span id="dossierRole">Junior Developer</span>
+                    </div>
+                    <div class="dossier-weapon">
+                      <span class="dossier-label">Weapon</span>
+                      <strong id="dossierWeaponName">Red Stapler</strong>
+                      <button id="dossierSwitchWeaponBtn" type="button" class="dossier-switch-btn mono">
+                        Change
+                      </button>
+                      <span id="dossierWeaponDesc" class="dossier-muted dossier-weapon-desc"></span>
+                    </div>
+                    <div class="dossier-skill">
+                      <span class="dossier-label">Skill</span>
+                      <strong id="dossierSkillName">Stack Overflow Surge</strong>
+                      <span class="sep" aria-hidden="true">·</span>
+                      <span id="dossierSkillDesc" class="dossier-muted"></span>
+                    </div>
+                  </div>
+                </div>
+                <div id="effectiveStatsStrip" class="effective-stats mono"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Office Arsenal Tab (10 Selectable Office-Item Weapons) -->
+          <div id="arsenalPane" class="tab-pane" hidden>
+            <div id="arsenalSelectedBar" class="arsenal-selected-bar"></div>
+            <div id="weaponGrid" class="weapon-grid" role="group" aria-label="Select office item weapon"></div>
+          </div>
+
+          <!-- Upgrades Tab -->
+          <div id="shopPane" class="tab-pane" hidden>
+            <div class="shop-summary">
+              <span>Available Salary</span>
+              <strong id="shopBankText" class="mono">$0</strong>
+            </div>
+            <div id="shopGrid" class="shop-grid"></div>
+          </div>
+
+          <!-- Primary Menu Actions -->
+          <div class="title-actions">
+            <button id="startButton" type="button" class="btn-primary" data-start="true">
+              Start Workday
+            </button>
+            <button id="resetButton" type="button" class="btn-ghost">
+              Reset Save
+            </button>
+          </div>
+        </div>
+
+        <p id="titleControlsHint" class="title-controls-hint mono">
+          Drag 3D View to Inspect · WASD Move · SHIFT Dodge · SPACE Skill · E Claim Perk
+        </p>
+      </section>
+
+      <!-- LEVEL-UP PERK MODAL (Player-Triggered via [E] or HUD Banner) -->
+      <section id="upgradeModal" class="modal-backdrop" aria-label="Level up perk selection" hidden>
+        <div class="modal-card modal-wide">
+          <div class="modal-head-row">
+            <div>
+              <div class="modal-meta mono" id="upgradeKicker">Level 2 · 1 Queued</div>
+              <h2>Choose one workplace perk</h2>
+            </div>
+            <div class="modal-head-actions">
+              <button id="rerollPerksButton" type="button" class="btn-secondary btn-compact mono">
+                Reroll ($15)
+              </button>
+              <button id="deferPerkButton" type="button" class="btn-ghost btn-compact">
+                Later
+              </button>
+            </div>
+          </div>
+          <div id="perkChoices" class="choice-grid-3"></div>
+        </div>
+      </section>
+
+      <!-- 12:30 PM STORY DILEMMA MODAL -->
+      <section id="dilemmaModal" class="modal-backdrop" aria-label="Workday story decision" hidden>
+        <div class="modal-card modal-medium">
+          <div class="modal-meta mono" id="dilemmaSender">All-Company Mailing List</div>
+          <h2 id="dilemmaTitle">12:30 PM · The Reply-All Incident</h2>
+          <p id="dilemmaPrompt" class="modal-copy"></p>
+          <div id="dilemmaChoices" class="choice-grid-2"></div>
+        </div>
+      </section>
+
+      <!-- PAUSE MODAL -->
+      <section id="pauseModal" class="modal-backdrop" aria-label="Game paused" hidden>
+        <div class="modal-card modal-narrow">
+          <div class="modal-meta mono">Shift Paused</div>
+          <h2>Catch your breath.</h2>
+          <p id="pauseSummary" class="modal-copy"></p>
+          <div class="modal-actions-col">
+            <button id="resumeButton" type="button" class="btn-primary">Resume Shift</button>
+            <button id="pauseSettingsButton" type="button" class="btn-secondary">Settings</button>
+            <button id="restartShiftButton" type="button" class="btn-secondary">Restart Day</button>
+            <button id="returnTitleButton" type="button" class="btn-ghost">Back to Lobby</button>
           </div>
         </div>
       </section>
 
-      <section id="upgradeScreen" class="screen">
-        <div class="choice-panel">
-          <p class="eyebrow">Level up</p>
-          <h2>Pick one suspiciously useful perk.</h2>
-          <div id="upgradeChoices" class="upgrade-list"></div>
+      <!-- CORPORATE DIRECTORY & 10-ROOM CAMPUS GUIDE MODAL -->
+      <section id="directoryModal" class="modal-backdrop settings-backdrop" aria-label="Corporate directory and campus guide" hidden>
+        <div class="modal-card modal-directory">
+          <div class="modal-head-row">
+            <div>
+              <div class="modal-meta mono">Apex Corp Intelligence · 17 Ranks · 10 Rooms</div>
+              <h2>Corporate Directory &amp; Floorplan</h2>
+            </div>
+            <button id="closeDirectoryTop" type="button" class="util-btn" aria-label="Close corporate directory">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <div class="panel-tabs directory-tabs" role="tablist" aria-label="Directory views">
+            <button type="button" role="tab" class="tab-btn is-active" data-dir-tab="hierarchy" aria-selected="true">
+              Corporate Hierarchy (17 Ranks)
+            </button>
+            <button type="button" role="tab" class="tab-btn" data-dir-tab="rooms" aria-selected="false">
+              Campus Floorplan (10 Rooms &amp; 8 Stations)
+            </button>
+          </div>
+
+          <div id="directoryHierarchyPane" class="directory-pane">
+            <div id="directoryHierarchyList" class="directory-hierarchy-list"></div>
+          </div>
+
+          <div id="directoryRoomsPane" class="directory-pane" hidden>
+            <div id="directoryRoomsList" class="directory-rooms-grid"></div>
+          </div>
+
+          <div class="settings-footer">
+            <span class="setup-sub mono">Tip: Flank IT Auditors from behind; cleanse HR Silence in the Washrooms or HR Shredder.</span>
+            <button id="doneDirectoryButton" type="button" class="btn-primary btn-compact">
+              Close
+            </button>
+          </div>
         </div>
       </section>
 
-      <section id="resultScreen" class="screen">
-        <div class="result-panel">
-          <p id="resultKicker" class="eyebrow">Day complete</p>
+      <!-- COMPREHENSIVE SETTINGS MODAL (Accessible from Lobby & Pause) -->
+      <section id="settingsModal" class="modal-backdrop settings-backdrop" aria-label="Game settings" hidden>
+        <div class="modal-card modal-settings">
+          <div class="modal-head-row">
+            <div>
+              <div class="modal-meta mono">Preferences · Saved Automatically</div>
+              <h2>Settings</h2>
+            </div>
+            <button id="closeSettingsTop" type="button" class="util-btn" aria-label="Close settings">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+            <button type="button" role="tab" class="tab-btn is-active" data-settings-tab="audio" aria-selected="true">Audio</button>
+            <button type="button" role="tab" class="tab-btn" data-settings-tab="video" aria-selected="false">Video &amp; Camera</button>
+            <button type="button" role="tab" class="tab-btn" data-settings-tab="gameplay" aria-selected="false">Gameplay</button>
+            <button type="button" role="tab" class="tab-btn" data-settings-tab="controls" aria-selected="false">Controls</button>
+          </div>
+
+          <!-- Audio Tab -->
+          <div id="settingsPaneAudio" class="settings-pane">
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Master Volume</strong>
+                <span>Scales all game audio output</span>
+              </div>
+              <div class="slider-control">
+                <input id="optMasterVol" type="range" min="0" max="100" step="5" value="80" />
+                <span id="optMasterVolVal" class="mono">80%</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Combat &amp; SFX Volume</strong>
+                <span>Shots, dodges, hits, telegraphs, and boss cues</span>
+              </div>
+              <div class="slider-control">
+                <input id="optSfxVol" type="range" min="0" max="100" step="5" value="85" />
+                <span id="optSfxVolVal" class="mono">85%</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>UI &amp; Alerts Volume</strong>
+                <span>Level-up chimes, pickups, station buffs, and menu ticks</span>
+              </div>
+              <div class="slider-control">
+                <input id="optUiVol" type="range" min="0" max="100" step="5" value="75" />
+                <span id="optUiVolVal" class="mono">75%</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Mute All Audio</strong>
+                <span>Silence synthesizer output immediately</span>
+              </div>
+              <button id="optMuted" type="button" class="toggle-btn" aria-pressed="false">Off</button>
+            </div>
+          </div>
+
+          <!-- Video & Camera Tab -->
+          <div id="settingsPaneVideo" class="settings-pane" hidden>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Graphics Quality</strong>
+                <span>Adjusts render resolution and particle density</span>
+              </div>
+              <div id="optQualityGroup" class="segmented-group" role="group" aria-label="Graphics quality">
+                <button type="button" data-val="low">Low</button>
+                <button type="button" data-val="medium">Medium</button>
+                <button type="button" data-val="high">High</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Real-Time Shadows</strong>
+                <span id="optShadowsHint">Soft directional shadows on GPU devices</span>
+              </div>
+              <button id="optShadows" type="button" class="toggle-btn" aria-pressed="true">On</button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Frame Rate Cap</strong>
+                <span>Limit GPU render rate to reduce fan noise</span>
+              </div>
+              <div id="optFpsGroup" class="segmented-group" role="group" aria-label="FPS cap">
+                <button type="button" data-val="30">30 FPS</button>
+                <button type="button" data-val="60">60 FPS</button>
+                <button type="button" data-val="0">Unlimited</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Camera Perspective</strong>
+                <span>Switch between overhead Third-Person and eye-level First-Person (V)</span>
+              </div>
+              <div id="optViewModeGroup" class="segmented-group" role="group" aria-label="Camera perspective">
+                <button type="button" data-val="third">Third-Person</button>
+                <button type="button" data-val="fps">First-Person</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Camera Zoom / FPS FOV</strong>
+                <span>Controls framing distance in 3P or field of view in FPS</span>
+              </div>
+              <div id="optZoomGroup" class="segmented-group" role="group" aria-label="Camera zoom">
+                <button type="button" data-val="close">Close</button>
+                <button type="button" data-val="standard">Standard</button>
+                <button type="button" data-val="wide">Wide</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>3P Camera Angle</strong>
+                <span>Switch between tactical overhead and cinematic tilt</span>
+              </div>
+              <div id="optTiltGroup" class="segmented-group" role="group" aria-label="Camera angle">
+                <button type="button" data-val="tactical">Top-Down</button>
+                <button type="button" data-val="isometric">Balanced</button>
+                <button type="button" data-val="cinematic">Low Tilt</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>FPS Mouse Sensitivity</strong>
+                <span>Adjust horizontal and vertical look speed in First-Person view</span>
+              </div>
+              <div class="slider-control">
+                <input id="optMouseSens" type="range" min="30" max="200" step="10" value="100" />
+                <span id="optMouseSensVal" class="mono">1.0×</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gameplay Tab -->
+          <div id="settingsPaneGameplay" class="settings-pane" hidden>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Aim Mode</strong>
+                <span>Auto-target nearest threat (with click override) or pure manual cursor aim</span>
+              </div>
+              <div id="optAimGroup" class="segmented-group" role="group" aria-label="Aim mode">
+                <button type="button" data-val="auto">Auto-Aim</button>
+                <button type="button" data-val="manual">Manual Mouse</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Screen Shake</strong>
+                <span>Subtle camera trauma on explosions, hits, and boss slams</span>
+              </div>
+              <button id="optScreenShake" type="button" class="toggle-btn" aria-pressed="true">On</button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Hitstop Freeze-Frames</strong>
+                <span>Brief impact pause on enemy knockouts and heavy blows</span>
+              </div>
+              <button id="optHitstop" type="button" class="toggle-btn" aria-pressed="true">On</button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong>Floating Damage Numbers</strong>
+                <span>Display projected damage numbers above targets</span>
+              </div>
+              <button id="optDamageNumbers" type="button" class="toggle-btn" aria-pressed="true">On</button>
+            </div>
+          </div>
+
+          <!-- Controls / Keybindings Tab -->
+          <div id="settingsPaneControls" class="settings-pane" hidden>
+            <p class="controls-note">Click any key below and press a new key to rebind. Press Escape to cancel.</p>
+            <div id="keybindList" class="keybind-list"></div>
+          </div>
+
+          <div class="settings-footer">
+            <button id="resetSettingsButton" type="button" class="btn-ghost btn-compact">
+              Reset Defaults
+            </button>
+            <button id="doneSettingsButton" type="button" class="btn-primary btn-compact">
+              Done
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- VICTORY / BURNOUT RESULT MODAL -->
+      <section id="resultModal" class="modal-backdrop" aria-label="Shift results" hidden>
+        <div class="modal-card modal-medium">
+          <div class="modal-meta mono" id="resultKicker">Shift Complete</div>
           <h2 id="resultTitle">You survived Monday.</h2>
-          <p id="resultSummary"></p>
-          <div id="achievementList" class="achievement-list"></div>
-          <div class="menu-actions">
-            <button id="nextDayButton" class="primary">Back to Office</button>
+          <p id="resultEpilogue" class="modal-copy"></p>
+          <div id="resultStats" class="result-stats-grid"></div>
+          <div id="resultAchievements" class="result-achievements"></div>
+          <div class="modal-actions-row">
+            <button id="playAgainButton" type="button" class="btn-primary" data-start="true">
+              Next Workday
+            </button>
+            <button id="resultLobbyButton" type="button" class="btn-secondary">
+              Office Upgrades
+            </button>
           </div>
         </div>
       </section>
     </main>
 
-    <script src="game.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
