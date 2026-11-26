@@ -7,6 +7,8 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "start": "node server.js",
     "build": "vite build",
+    "cf:dev": "vite build && wrangler dev",
+    "deploy": "vite build && wrangler deploy",
     "lint": "tsc --noEmit",
     "test": "npx --yes tsx --test src/game/rules.test.ts"
   },
@@ -19,5 +21,8 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
+  },
+  "devDependencies": {
+    "wrangler": "^4.168.0"
   }
 }

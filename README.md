@@ -1,26 +1,46 @@
 # Office Survivor
 
-A browser-playable office roguelite where you survive an 8-hour workday by completing tasks, dodging meetings, collecting coffee, and defeating deadline bosses.
+A 3D browser-playable corporate roguelite built with Three.js, Vite, and TypeScript. Survive a 5-day launch across a 10-room corporate tower using selectable office-item weapons, third-person or first-person views, and permanent upgrades.
 
-## Play
+## Local Development
 
-Open the local URL while the dev server is running:
-
-```text
-http://127.0.0.1:4173/
+```bash
+npm install
+npm run dev
 ```
 
-Controls:
+Runs the Vite dev server on `http://localhost:3000`.
 
-- Move with WASD or arrow keys.
-- Work attacks happen automatically against nearby office chaos.
-- Pick one upgrade whenever you level up.
-- Earn salary after each run and spend it on permanent upgrades.
+## Deploying to Cloudflare Workers
 
-## Current Build
+This project is configured for **Cloudflare Workers Static Assets** via `wrangler.jsonc`, serving the compiled Vite bundle (`./dist`) directly from Cloudflare's edge with SPA routing and caching/security headers (`public/_headers`).
 
-- Four employee classes: Junior Developer, Senior Developer, QA Engineer, and DevOps.
-- Resources: productivity, energy, focus, and happiness.
-- Enemies: Email Spam, Urgent Bug, Manager, HR Training, Printer Jam, and day bosses.
-- Daily flavor events including Monday fatigue, Wednesday production bugs, Thursday demo chaos, and Friday pizza.
-- Permanent progression saved in browser local storage.
+### Option 1: Deploy via Wrangler CLI
+
+```bash
+npx wrangler login
+npm run deploy
+```
+
+To test the production bundle locally in Cloudflare's Workers runtime before deploying:
+
+```bash
+npm run cf:dev
+```
+
+### Option 2: Cloudflare Dashboard Git Integration
+
+Connect your repository in **Workers & Pages -> Create -> Workers** with:
+
+- **Build command:** `npm run build`
+- **Deploy command:** `npx wrangler deploy`
+- **Root directory:** `/`
+
+## Scripts
+
+- `npm run dev` — Start Vite dev server on port 3000
+- `npm run build` — Build production bundle to `./dist`
+- `npm run cf:dev` — Build and preview locally inside Wrangler
+- `npm run deploy` — Build and deploy to Cloudflare Workers
+- `npm run lint` — Run TypeScript typechecking (`tsc --noEmit`)
+- `npm test` — Run game simulation unit tests
