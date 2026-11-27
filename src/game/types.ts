@@ -21,6 +21,18 @@ export type OfficeWeaponPattern =
   | "cannon"
   | "snare";
 
+export type EnemyProjectileKind =
+  | "spreadsheet"
+  | "kanban_card"
+  | "code_review"
+  | "coffee_cup"
+  | "policy_memo"
+  | "calendar_invite"
+  | "firewall_disc"
+  | "server_blade"
+  | "audit_ledger"
+  | "exec_directive";
+
 export type DifficultyId = "intern" | "standard" | "crunch" | "nightmare";
 
 export type GameScreenState =
@@ -461,6 +473,8 @@ export interface EnemyArchetypeDef {
   focusDamage: number;
   xp: number;
   salary: number;
+  spawnWeight: number;
+  spawnCooldown: number;
   boss?: boolean;
   elite?: boolean;
   meeting?: boolean;
@@ -564,12 +578,15 @@ export interface EnemyEntity {
   knockX: number;
   knockZ: number;
   walkPhase: number;
+  castTimer: number;
+  volleyStep: number;
 }
 
 export interface ProjectileEntity {
   id: string;
   fromEnemy: boolean;
   weaponId?: OfficeWeaponId;
+  enemyKind?: EnemyProjectileKind;
   x: number;
   z: number;
   vx: number;
@@ -581,12 +598,21 @@ export interface ProjectileEntity {
   ricochet: number;
   hitIds: Set<string>;
   ttl: number;
+  maxTtl?: number;
   crit: boolean;
   evolved?: boolean;
   splashRadius?: number;
   slowDuration?: number;
   markDuration?: number;
   knockScale?: number;
+  curveRate?: number;
+  arcHeight?: number;
+  wallBounces?: number;
+  spawnsHazard?: FloorHazardKind;
+  appliesSilence?: number;
+  appliesFocusDrain?: number;
+  appliesTax?: number;
+  callout?: string;
 }
 
 export interface TelegraphEntity {
@@ -745,6 +771,7 @@ export interface GameState {
   elapsed: number;
   dayLength: number;
   spawnTimer: number;
+  enemySpawnCooldowns: Partial<Record<EnemyTypeId, number>>;
   squadTimer: number;
   hazardTimer: number;
   coffeeTimer: number;

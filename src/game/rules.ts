@@ -33,6 +33,7 @@ import type {
   DilemmaChoice,
   EmployeeClassId,
   EnemyEntity,
+  EnemyProjectileKind,
   EnemyTypeId,
   FloorHazardKind,
   GameState,
@@ -382,6 +383,7 @@ export function createGameState(
     elapsed: 0,
     dayLength: DAY_LENGTH_SECONDS,
     spawnTimer: 1.35,
+    enemySpawnCooldowns: {},
     squadTimer: 38,
     hazardTimer: 18,
     coffeeTimer: 12,
@@ -607,10 +609,19 @@ export function spawnEnemy(
     deathTimer: 0,
     knockX: 0,
     knockZ: 0,
-    walkPhase: rng() * Math.PI * 2
+    walkPhase: rng() * Math.PI * 2,
+    castTimer: 0,
+    volleyStep: 0
   };
   moveWithCollisions(enemy, 0, 0, enemy.radius);
   state.enemies.push(enemy);
+
+  if (!def.boss && def.spawnCooldown > 0) {
+    state.enemySpawnCooldowns[typeId] = Math.max(
+      state.enemySpawnCooldowns[typeId] ?? 0,
+      def.spawnCooldown / state.difficulty.spawnRateMult
+    );
+  }
 
   if (def.boss) {
     const roomName = getRoomAtPosition(enemy.x, enemy.z).name;
@@ -1423,6 +1434,25 @@ export function getSpawnCaps(state: GameState): {
   return { totalCap, tier2Cap, tier3Cap };
 }
 
+function pickWeightedEnemy(
+  candidates: EnemyTypeId[],
+  cooldowns: Partial<Record<EnemyTypeId, number>>,
+  rng: () => number
+): EnemyTypeId {
+  const ready = candidates.filter((id) => (cooldowns[id] ?? 0) <= 0);
+  const pool = ready.length > 0 ? ready : candidates;
+  let totalWeight = 0;
+  for (const id of pool) {
+    totalWeight += Math.max(0.1, ENEMY_ARCHETYPES[id].spawnWeight || 1);
+  }
+  let target = rng() * totalWeight;
+  for (const id of pool) {
+    target -= Math.max(0.1, ENEMY_ARCHETYPES[id].spawnWeight || 1);
+    if (target <= 0) return id;
+  }
+  return pool[pool.length - 1];
+}
+
 export function pickEnemyArchetype(state: GameState, rng: () => number): EnemyTypeId {
   const t = state.elapsed / state.dayLength;
   const allowed = state.chapter.allowedEnemies;
@@ -1433,8 +1463,11 @@ export function pickEnemyArchetype(state: GameState, rng: () => number): EnemyTy
   const counts = countLivingByTier(state);
   const caps = getSpawnCaps(state);
 
-  const canSpawnTier3 = tier3.length > 0 && t > 0.34 && counts.tier3 < caps.tier3Cap;
-  const canSpawnTier2 = tier2.length > 0 && t > 0.14 && counts.tier2 < caps.tier2Cap;
+  const readyTier3 = tier3.filter((id) => (state.enemySpawnCooldowns[id] ?? 0) <= 0);
+  const readyTier2 = tier2.filter((id) => (state.enemySpawnCooldowns[id] ?? 0) <= 0);
+
+  const canSpawnTier3 = readyTier3.length > 0 && t > 0.34 && counts.tier3 < caps.tier3Cap;
+  const canSpawnTier2 = readyTier2.length > 0 && t > 0.14 && counts.tier2 < caps.tier2Cap;
 
   const roll = rng();
   const eliteChance = canSpawnTier3
@@ -1443,15 +1476,15 @@ export function pickEnemyArchetype(state: GameState, rng: () => number): EnemyTy
   const leadChance = canSpawnTier2 ? (t > 0.35 ? 0.17 : 0.11) : 0;
 
   if (canSpawnTier3 && roll < eliteChance) {
-    return tier3[Math.floor(rng() * tier3.length)];
+    return pickWeightedEnemy(readyTier3, state.enemySpawnCooldowns, rng);
   }
   if (canSpawnTier2 && roll < eliteChance + leadChance) {
-    return tier2[Math.floor(rng() * tier2.length)];
+    return pickWeightedEnemy(readyTier2, state.enemySpawnCooldowns, rng);
   }
   if (tier1.length > 0) {
-    return tier1[Math.floor(rng() * tier1.length)];
+    return pickWeightedEnemy(tier1, state.enemySpawnCooldowns, rng);
   }
-  return allowed[Math.floor(rng() * allowed.length)] || "email";
+  return pickWeightedEnemy(allowed, state.enemySpawnCooldowns, rng) || "email";
 }
 
 function spawnTacticalSquad(state: GameState, rng: () => number, events: SimEvent[]): void {
@@ -1871,6 +1904,15 @@ export function stepSimulation(
   state.coffeeTimer -= dt;
   state.eventTimer -= dt;
 
+  for (const key of Object.keys(state.enemySpawnCooldowns) as EnemyTypeId[]) {
+    const rem = (state.enemySpawnCooldowns[key] ?? 0) - dt;
+    if (rem <= 0) {
+      delete state.enemySpawnCooldowns[key];
+    } else {
+      state.enemySpawnCooldowns[key] = rem;
+    }
+  }
+
   for (const st of ALL_STATIONS) {
     state.stationCooldowns[st.id] = Math.max(0, state.stationCooldowns[st.id] - dt);
   }
@@ -2225,25 +2267,93 @@ export function stepSimulation(
     }
   }
 
-  // Update Projectiles (Blocked by Partition Walls, Pass Over Desks, Pierce & Ricochet)
+  // Update Projectiles (Curving Arcs, Wall Bounces, Hazard Splatters, Pierce & Ricochet)
   for (let i = state.projectiles.length - 1; i >= 0; i -= 1) {
     const shot = state.projectiles[i];
+    if (shot.curveRate) {
+      const ca = Math.cos(shot.curveRate * dt);
+      const sa = Math.sin(shot.curveRate * dt);
+      const nvx = shot.vx * ca - shot.vz * sa;
+      const nvz = shot.vx * sa + shot.vz * ca;
+      shot.vx = nvx;
+      shot.vz = nvz;
+    }
+
+    const prevX = shot.x;
+    const prevZ = shot.z;
     shot.x += shot.vx * dt;
     shot.z += shot.vz * dt;
     shot.ttl -= dt;
 
-    if (
-      Math.abs(shot.x) > WORLD_BOUNDS.halfW ||
-      Math.abs(shot.z) > WORLD_BOUNDS.halfD ||
-      CAMPUS_WALLS.some((w) => resolveCircleAABB(shot.x, shot.z, shot.radius * 0.6, w) !== null)
-    ) {
-      state.projectiles.splice(i, 1);
-      continue;
+    const hitArenaX = Math.abs(shot.x) > WORLD_BOUNDS.halfW;
+    const hitArenaZ = Math.abs(shot.z) > WORLD_BOUNDS.halfD;
+    const hitWall = CAMPUS_WALLS.find(
+      (w) => resolveCircleAABB(shot.x, shot.z, shot.radius * 0.6, w) !== null
+    );
+
+    if (hitArenaX || hitArenaZ || hitWall) {
+      if (shot.wallBounces && shot.wallBounces > 0) {
+        shot.wallBounces -= 1;
+        if (hitArenaX) {
+          shot.vx = -shot.vx;
+          shot.x = prevX;
+        } else if (hitArenaZ) {
+          shot.vz = -shot.vz;
+          shot.z = prevZ;
+        } else if (hitWall) {
+          const hitOnX = resolveCircleAABB(shot.x, prevZ, shot.radius * 0.6, hitWall) !== null;
+          const hitOnZ = resolveCircleAABB(prevX, shot.z, shot.radius * 0.6, hitWall) !== null;
+          if (hitOnX) {
+            shot.vx = -shot.vx;
+            shot.x = prevX;
+          }
+          if (hitOnZ || !hitOnX) {
+            shot.vz = -shot.vz;
+            shot.z = prevZ;
+          }
+        }
+        shot.ttl = Math.max(shot.ttl, 0.85);
+      } else {
+        if (shot.spawnsHazard) {
+          spawnHazardAtPoint(state, shot.spawnsHazard, prevX, prevZ);
+        }
+        state.projectiles.splice(i, 1);
+        continue;
+      }
     }
 
     if (shot.fromEnemy) {
       if (dist2D(shot.x, shot.z, p.x, p.z) <= shot.radius + p.radius) {
-        damagePlayer(state, shot.damage, 8, 1, "DIRECTIVE!", shot.color, events, options);
+        if (shot.appliesSilence && shot.appliesSilence > 0) {
+          state.policySilenceTimer = Math.max(
+            state.policySilenceTimer,
+            shot.appliesSilence / p.meetingResist
+          );
+        }
+        if (shot.appliesTax && shot.appliesTax > 0) {
+          const fine = Math.min(state.salary, shot.appliesTax);
+          state.salary = Math.max(0, state.salary - fine);
+        }
+        if (shot.spawnsHazard) {
+          spawnHazardAtPoint(state, shot.spawnsHazard, shot.x, shot.z);
+        }
+        damagePlayer(
+          state,
+          shot.damage,
+          shot.appliesFocusDrain ?? 8,
+          1,
+          shot.callout || "DIRECTIVE!",
+          shot.color,
+          events,
+          options
+        );
+        state.projectiles.splice(i, 1);
+        continue;
+      }
+      if (shot.ttl <= 0) {
+        if (shot.spawnsHazard) {
+          spawnHazardAtPoint(state, shot.spawnsHazard, shot.x, shot.z);
+        }
         state.projectiles.splice(i, 1);
         continue;
       }
@@ -2355,6 +2465,7 @@ export function stepSimulation(
     enemy.slowTimer = Math.max(0, enemy.slowTimer - dt);
     enemy.markedTimer = Math.max(0, enemy.markedTimer - dt);
     enemy.rallyTimer = Math.max(0, enemy.rallyTimer - dt);
+    enemy.castTimer = Math.max(0, enemy.castTimer - dt);
 
     if (Math.abs(enemy.knockX) > 0.05 || Math.abs(enemy.knockZ) > 0.05) {
       moveWithCollisions(enemy, enemy.knockX * dt, enemy.knockZ * dt, enemy.radius);
@@ -2486,31 +2597,83 @@ function rallyNearbyAllies(state: GameState, leader: EnemyEntity, radius = 6.8):
   }
 }
 
-function fireEnemyBolt(
+function spawnHazardAtPoint(
+  state: GameState,
+  kind: FloorHazardKind,
+  x: number,
+  z: number
+): void {
+  if (state.hazards.length >= 6) {
+    const idx = state.hazards.findIndex((h) => h.kind === kind);
+    if (idx >= 0) state.hazards.splice(idx, 1);
+    else return;
+  }
+  const durMult = state.difficulty.hazardDurationMult;
+  state.hazards.push({
+    id: nextId(state, "hz"),
+    kind,
+    x: clamp(x, -WORLD_BOUNDS.halfW + 1.5, WORLD_BOUNDS.halfW - 1.5),
+    z: clamp(z, -WORLD_BOUNDS.halfD + 1.5, WORLD_BOUNDS.halfD - 1.5),
+    vx: 0,
+    vz: 0,
+    radius: kind === "coffee_spill" ? 1.85 : 1.75,
+    elapsed: 0,
+    duration: (kind === "coffee_spill" ? 7.5 : 6.5) * durMult,
+    tickCooldown: 0
+  });
+}
+
+interface EnemyShotOptions {
+  kind: EnemyProjectileKind;
+  speed: number;
+  damage: number;
+  color: string;
+  radius?: number;
+  ttl?: number;
+  curveRate?: number;
+  arcHeight?: number;
+  wallBounces?: number;
+  spawnsHazard?: FloorHazardKind;
+  appliesSilence?: number;
+  appliesFocusDrain?: number;
+  appliesTax?: number;
+  callout?: string;
+}
+
+function fireEnemyProjectile(
   state: GameState,
   enemy: EnemyEntity,
   dirX: number,
   dirZ: number,
-  speed: number,
-  damage: number,
-  color: string,
-  radius = 0.34
+  opts: EnemyShotOptions
 ): void {
+  const ttl = opts.ttl ?? 2.35;
+  enemy.castTimer = Math.max(enemy.castTimer, 0.34);
   state.projectiles.push({
     id: nextId(state, "pr"),
     fromEnemy: true,
+    enemyKind: opts.kind,
     x: enemy.x + dirX * (enemy.radius + 0.25),
     z: enemy.z + dirZ * (enemy.radius + 0.25),
-    vx: dirX * speed,
-    vz: dirZ * speed,
-    radius,
-    damage,
-    color,
+    vx: dirX * opts.speed,
+    vz: dirZ * opts.speed,
+    radius: opts.radius ?? 0.36,
+    damage: opts.damage,
+    color: opts.color,
     pierce: 0,
     ricochet: 0,
     hitIds: new Set<string>(),
-    ttl: 2.4,
-    crit: false
+    ttl,
+    maxTtl: ttl,
+    crit: false,
+    curveRate: opts.curveRate,
+    arcHeight: opts.arcHeight,
+    wallBounces: opts.wallBounces,
+    spawnsHazard: opts.spawnsHazard,
+    appliesSilence: opts.appliesSilence,
+    appliesFocusDrain: opts.appliesFocusDrain,
+    appliesTax: opts.appliesTax,
+    callout: opts.callout
   });
 }
 
@@ -2545,23 +2708,60 @@ function updateEnemyPolicy(
     return bumped;
   };
 
+  // === TIER 1 SWARMERS: Unread Email (Agile Hop Dash) vs Overeager Intern (Arcing Coffee Toss) ===
   if (enemy.policy === "swarmer") {
-    const wave = Math.sin(enemy.walkPhase * 0.9) * 0.42 * enemy.orbitSign;
+    if (enemy.typeId === "intern") {
+      const wave = Math.sin(enemy.walkPhase * 0.7) * 0.34 * enemy.orbitSign;
+      const n = norm2D(steerX - steerZ * wave, steerZ + steerX * wave);
+      moveWithSlide(n.x, n.z, speed);
+
+      // Intern lobs an arcing hot coffee cup that splatters into a real slowing coffee_spill puddle!
+      if (sameRoom && dToPlayer < 9.5 && dToPlayer > 2.4 && enemy.abilityCooldown <= 0) {
+        enemy.abilityCooldown = 4.2 + rng() * 1.4;
+        const flightTime = clamp(dToPlayer / 7.2, 0.55, 1.25);
+        const lobSpeed = dToPlayer / flightTime;
+        fireEnemyProjectile(state, enemy, toX, toZ, {
+          kind: "coffee_cup",
+          speed: lobSpeed,
+          damage: 7.5,
+          color: "#d97706",
+          radius: 0.36,
+          ttl: flightTime,
+          arcHeight: 2.25,
+          spawnsHazard: "coffee_spill",
+          appliesFocusDrain: 5,
+          callout: "HOT COFFEE!"
+        });
+      }
+      return;
+    }
+
+    // Unread Email: agile zig-zag with brief reply-all hop bursts when closing in
+    const hopBoost = sameRoom && dToPlayer < 5.6 && enemy.abilityCooldown <= 0 ? 1.55 : 1.0;
+    if (hopBoost > 1) {
+      enemy.abilityCooldown = 2.6 + rng() * 0.8;
+      enemy.castTimer = 0.25;
+      enemy.knockX += toX * 4.2;
+      enemy.knockZ += toZ * 4.2;
+    }
+    const wave = Math.sin(enemy.walkPhase * 1.05) * 0.45 * enemy.orbitSign;
     const n = norm2D(steerX - steerZ * wave, steerZ + steerX * wave);
-    moveWithSlide(n.x, n.z, speed);
+    moveWithSlide(n.x, n.z, speed * hopBoost);
     return;
   }
 
+  // === P0 BUG CHARGER & VP OF OPS BRUISER ===
   if (enemy.policy === "charger" || enemy.policy === "vp_bruiser") {
     const isVp = enemy.policy === "vp_bruiser";
     if (enemy.aiPhase === "move") {
       if (
         isVp &&
-        dToPlayer < 4.5 &&
+        dToPlayer < 4.6 &&
         enemy.abilityCooldown <= 0 &&
         countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS
       ) {
-        enemy.abilityCooldown = 3.6;
+        enemy.abilityCooldown = 3.5;
+        enemy.castTimer = 0.45;
         state.telegraphs.push({
           id: nextId(state, "tg"),
           kind: "shockwave",
@@ -2570,7 +2770,7 @@ function updateEnemyPolicy(
           z: enemy.z,
           dirX: 0,
           dirZ: -1,
-          radius: 4.1,
+          radius: 4.2,
           length: 0,
           elapsed: 0,
           duration: 0.72,
@@ -2630,8 +2830,24 @@ function updateEnemyPolicy(
       enemy.aiTimer -= dt;
       if (bumped || enemy.aiTimer <= 0) {
         enemy.aiPhase = "recover";
-        enemy.aiTimer = 0.6;
-        enemy.abilityCooldown = isVp ? 3.0 : 3.2;
+        enemy.aiTimer = 0.62;
+        enemy.abilityCooldown = isVp ? 3.1 : 3.3;
+        // VP of Ops releases a 3-way Executive Directive burst on charge finish!
+        if (isVp) {
+          const baseA = Math.atan2(toZ, toX);
+          for (const off of [-0.36, 0, 0.36]) {
+            fireEnemyProjectile(state, enemy, Math.cos(baseA + off), Math.sin(baseA + off), {
+              kind: "exec_directive",
+              speed: 9.2,
+              damage: 11,
+              color: "#f97316",
+              radius: 0.4,
+              ttl: 1.9,
+              appliesFocusDrain: 9,
+              callout: "RESTRUCTURED!"
+            });
+          }
+        }
       }
     } else if (enemy.aiPhase === "recover") {
       enemy.aiTimer -= dt;
@@ -2640,8 +2856,9 @@ function updateEnemyPolicy(
     return;
   }
 
+  // === JUNIOR ANALYST: Midrange Twin-Sheet Excel Spreadsheet Double-Tap ===
   if (enemy.policy === "ranged") {
-    const idealDist = 7.4;
+    const idealDist = 7.6;
     if (!sameRoom || dToPlayer > idealDist + 1.4) {
       moveWithSlide(steerX, steerZ, speed);
     } else if (dToPlayer < idealDist - 1.8) {
@@ -2650,12 +2867,25 @@ function updateEnemyPolicy(
       moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.7);
     }
     if (sameRoom && dToPlayer < 13 && enemy.abilityCooldown <= 0) {
-      enemy.abilityCooldown = 2.6 + rng() * 0.9;
-      fireEnemyBolt(state, enemy, toX, toZ, 9.6, 8.5, def.accentColor);
+      enemy.abilityCooldown = 2.8 + rng() * 0.85;
+      const baseA = Math.atan2(toZ, toX);
+      for (const off of [-0.11, 0.11]) {
+        fireEnemyProjectile(state, enemy, Math.cos(baseA + off), Math.sin(baseA + off), {
+          kind: "spreadsheet",
+          speed: 8.6,
+          damage: 7.5,
+          color: "#22c55e",
+          radius: 0.34,
+          ttl: 2.1,
+          appliesFocusDrain: 7,
+          callout: "SPREADSHEET!"
+        });
+      }
     }
     return;
   }
 
+  // === TECH LEAD: Architecture Rally Aura + 3-Card PR Rejection Fan ===
   if (enemy.policy === "lead_buffer") {
     rallyNearbyAllies(state, enemy, 6.8);
     if (!sameRoom || dToPlayer > 8.4) {
@@ -2666,32 +2896,78 @@ function updateEnemyPolicy(
       moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.6);
     }
     if (sameRoom && dToPlayer < 12.5 && enemy.abilityCooldown <= 0) {
-      enemy.abilityCooldown = 2.4 + rng() * 0.8;
-      fireEnemyBolt(state, enemy, toX, toZ, 10.6, 10, "#38bdf8");
+      enemy.abilityCooldown = 2.9 + rng() * 0.8;
+      const baseA = Math.atan2(toZ, toX);
+      for (const off of [-0.25, 0, 0.25]) {
+        fireEnemyProjectile(state, enemy, Math.cos(baseA + off), Math.sin(baseA + off), {
+          kind: "code_review",
+          speed: 9.4,
+          damage: 9,
+          color: "#14b8a6",
+          radius: 0.36,
+          ttl: 2.0,
+          appliesFocusDrain: 11,
+          callout: "PR REJECTED!"
+        });
+      }
     }
     return;
   }
 
+  // === PRODUCT LEAD: Alternates Scope Creep Summon & Twin Curving Boomerang Kanban Cards ===
   if (enemy.policy === "lead_spawner") {
-    if (!sameRoom || dToPlayer > 9.5) {
+    if (!sameRoom || dToPlayer > 9.2) {
       moveWithSlide(steerX, steerZ, speed);
-    } else if (dToPlayer < 5.8) {
+    } else if (dToPlayer < 5.5) {
       moveWithSlide(-toX, -toZ, speed * 0.65);
     } else {
-      moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.55);
+      moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.58);
     }
-    if (enemy.abilityCooldown <= 0 && state.enemies.length < 24 && dToPlayer < 16) {
-      enemy.abilityCooldown = 5.4 + rng() * 1.4;
-      const summonId: EnemyTypeId = rng() < 0.55 ? "intern" : "email";
-      spawnEnemy(state, summonId, rng, events, {
-        x: enemy.x + (rng() - 0.5) * 1.6,
-        z: enemy.z + (rng() - 0.5) * 1.6
-      });
-      addFloater(state, "SCOPE CREEP!", enemy.x, 2.2, enemy.z, "#c084fc");
+    if (sameRoom && enemy.abilityCooldown <= 0 && dToPlayer < 14.5) {
+      enemy.volleyStep += 1;
+      if (enemy.volleyStep % 2 === 1) {
+        // Throw 2 curving sticky Kanban cards that bend around desks!
+        enemy.abilityCooldown = 2.8 + rng() * 0.7;
+        const baseA = Math.atan2(toZ, toX);
+        fireEnemyProjectile(state, enemy, Math.cos(baseA - 0.36), Math.sin(baseA - 0.36), {
+          kind: "kanban_card",
+          speed: 8.8,
+          damage: 9.5,
+          color: "#f59e0b",
+          radius: 0.36,
+          ttl: 2.3,
+          curveRate: 0.78,
+          appliesFocusDrain: 9,
+          callout: "KANBAN TICKET!"
+        });
+        fireEnemyProjectile(state, enemy, Math.cos(baseA + 0.36), Math.sin(baseA + 0.36), {
+          kind: "kanban_card",
+          speed: 8.8,
+          damage: 9.5,
+          color: "#f59e0b",
+          radius: 0.36,
+          ttl: 2.3,
+          curveRate: -0.78,
+          appliesFocusDrain: 9,
+          callout: "KANBAN TICKET!"
+        });
+      } else if (state.enemies.length < 22) {
+        enemy.abilityCooldown = 4.6 + rng() * 1.1;
+        enemy.castTimer = 0.45;
+        const summonId: EnemyTypeId = rng() < 0.55 ? "intern" : "email";
+        spawnEnemy(state, summonId, rng, events, {
+          x: enemy.x + (rng() - 0.5) * 1.6,
+          z: enemy.z + (rng() - 0.5) * 1.6
+        });
+        addFloater(state, "SCOPE CREEP!", enemy.x, 2.2, enemy.z, "#f59e0b");
+      } else {
+        enemy.abilityCooldown = 2.4;
+      }
     }
     return;
   }
 
+  // === HR SPECIALIST & HR DIRECTOR: Policy Silence Rings + Stamped HR Policy Memos ===
   if (enemy.policy === "hr_silencer" || enemy.policy === "hr_director") {
     const isDirector = enemy.policy === "hr_director";
     if (!sameRoom || dToPlayer > 8.8) {
@@ -2702,50 +2978,77 @@ function updateEnemyPolicy(
       moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.62);
     }
 
-    if (
-      sameRoom &&
-      dToPlayer < 11.5 &&
-      enemy.abilityCooldown <= 0 &&
-      countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS
-    ) {
-      enemy.abilityCooldown = isDirector ? 3.8 : 4.6 + rng() * 1.1;
-      state.telegraphs.push({
-        id: nextId(state, "tg"),
-        kind: "policy_ring",
-        ownerId: enemy.id,
-        x: p.x,
-        z: p.z,
-        dirX: 0,
-        dirZ: -1,
-        radius: isDirector ? 3.1 : 2.45,
-        length: 0,
-        elapsed: 0,
-        duration: isDirector ? 0.75 : 0.82,
-        resolved: false,
-        color: isDirector ? "#f43f5e" : "#c084fc"
-      });
-      events.push({ type: "telegraph", x: p.x, z: p.z, color: "#c084fc" });
+    if (sameRoom && dToPlayer < 12.2 && enemy.abilityCooldown <= 0) {
+      enemy.abilityCooldown = isDirector ? 3.7 : 4.2 + rng() * 1.0;
+      enemy.castTimer = 0.42;
+
+      if (countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "policy_ring",
+          ownerId: enemy.id,
+          x: p.x,
+          z: p.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: isDirector ? 3.1 : 2.45,
+          length: 0,
+          elapsed: 0,
+          duration: isDirector ? 0.78 : 0.84,
+          resolved: false,
+          color: isDirector ? "#f43f5e" : "#c084fc"
+        });
+        events.push({ type: "telegraph", x: p.x, z: p.z, color: "#c084fc" });
+      }
+
+      const baseA = Math.atan2(toZ, toX);
       if (isDirector) {
-        const baseA = Math.atan2(toZ, toX);
-        for (const off of [-0.24, 0, 0.24]) {
-          fireEnemyBolt(state, enemy, Math.cos(baseA + off), Math.sin(baseA + off), 10.2, 10, "#fb7185");
-        }
+        // 5-folder staggered PIP compliance wave (alternating fast/slow speeds!)
+        const offsets = [-0.42, -0.21, 0, 0.21, 0.42];
+        offsets.forEach((off, idx) => {
+          fireEnemyProjectile(state, enemy, Math.cos(baseA + off), Math.sin(baseA + off), {
+            kind: "policy_memo",
+            speed: idx % 2 === 0 ? 10.2 : 7.6,
+            damage: 10,
+            color: "#e11d48",
+            radius: 0.38,
+            ttl: 2.35,
+            appliesSilence: 1.8,
+            appliesFocusDrain: 10,
+            callout: "PIP MEMO!"
+          });
+        });
+      } else {
+        // HR Specialist throws a silencing Policy Memo
+        fireEnemyProjectile(state, enemy, toX, toZ, {
+          kind: "policy_memo",
+          speed: 7.8,
+          damage: 9,
+          color: "#a855f7",
+          radius: 0.38,
+          ttl: 2.4,
+          appliesSilence: 1.6,
+          appliesFocusDrain: 10,
+          callout: "HR MEMO!"
+        });
       }
     }
     return;
   }
 
+  // === IT SECURITY AUDITOR: Directional Shield + Midrange Hex Firewall Disc + Close EMP Slam ===
   if (enemy.policy === "shield_auditor") {
-    // Always keeps directional Firewall Shield facing player while advancing
     enemy.facingX = toX;
     enemy.facingZ = toZ;
     moveWithSlide(steerX, steerZ, speed);
+
     if (
       dToPlayer < 4.2 &&
       enemy.abilityCooldown <= 0 &&
       countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS
     ) {
-      enemy.abilityCooldown = 4.2;
+      enemy.abilityCooldown = 4.0;
+      enemy.castTimer = 0.45;
       state.telegraphs.push({
         id: nextId(state, "tg"),
         kind: "shockwave",
@@ -2754,7 +3057,7 @@ function updateEnemyPolicy(
         z: enemy.z,
         dirX: 0,
         dirZ: -1,
-        radius: 3.4,
+        radius: 3.45,
         length: 0,
         elapsed: 0,
         duration: 0.72,
@@ -2762,15 +3065,28 @@ function updateEnemyPolicy(
         color: "#38bdf8"
       });
       events.push({ type: "telegraph", x: enemy.x, z: enemy.z, color: "#38bdf8" });
+    } else if (sameRoom && dToPlayer >= 4.4 && dToPlayer < 11.2 && enemy.abilityCooldown <= 0) {
+      enemy.abilityCooldown = 3.5 + rng() * 0.9;
+      fireEnemyProjectile(state, enemy, toX, toZ, {
+        kind: "firewall_disc",
+        speed: 8.2,
+        damage: 11.5,
+        color: "#38bdf8",
+        radius: 0.46,
+        ttl: 2.3,
+        appliesFocusDrain: 9,
+        callout: "FIREWALL!"
+      });
     }
     return;
   }
 
+  // === MIDDLE MANAGER & SENIOR MANAGER: Sync Rings + Ricocheting/Curving Calendar Invites ===
   if (enemy.policy === "manager" || enemy.policy === "senior_manager") {
     const isSenior = enemy.policy === "senior_manager";
     if (isSenior) rallyNearbyAllies(state, enemy, 7.6);
 
-    if (!sameRoom || dToPlayer > 7.8) {
+    if (!sameRoom || dToPlayer > 8.0) {
       moveWithSlide(steerX, steerZ, speed);
     } else if (dToPlayer < 4.5) {
       moveWithSlide(-toX, -toZ, speed * 0.55);
@@ -2778,13 +3094,317 @@ function updateEnemyPolicy(
       moveWithSlide(-toZ * enemy.orbitSign, toX * enemy.orbitSign, speed * 0.52);
     }
 
-    if (
-      sameRoom &&
-      dToPlayer < 10.5 &&
-      enemy.abilityCooldown <= 0 &&
-      countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS
-    ) {
-      enemy.abilityCooldown = isSenior ? 4.0 : 4.6 + rng() * 1.2;
+    if (sameRoom && dToPlayer < 11.2 && enemy.abilityCooldown <= 0) {
+      enemy.abilityCooldown = isSenior ? 3.8 : 4.2 + rng() * 1.1;
+      enemy.castTimer = 0.42;
+
+      if (countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "meeting_ring",
+          ownerId: enemy.id,
+          x: p.x,
+          z: p.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: isSenior ? 2.7 : 2.35,
+          length: 0,
+          elapsed: 0,
+          duration: 0.78,
+          resolved: false,
+          color: "#f59e0b"
+        });
+        if (isSenior) {
+          state.telegraphs.push({
+            id: nextId(state, "tg"),
+            kind: "meeting_ring",
+            ownerId: enemy.id,
+            x: p.x + p.facingX * 2.8,
+            z: p.z + p.facingZ * 2.8,
+            dirX: 0,
+            dirZ: -1,
+            radius: 2.35,
+            length: 0,
+            elapsed: 0,
+            duration: 0.92,
+            resolved: false,
+            color: "#fbbf24"
+          });
+        }
+        events.push({ type: "telegraph", x: p.x, z: p.z, color: "#f59e0b" });
+      }
+
+      const baseA = Math.atan2(toZ, toX);
+      if (isSenior) {
+        // Senior Manager throws 2 curving golden Calendar Invites that cross paths
+        fireEnemyProjectile(state, enemy, Math.cos(baseA - 0.3), Math.sin(baseA - 0.3), {
+          kind: "calendar_invite",
+          speed: 9.0,
+          damage: 11,
+          color: "#eab308",
+          radius: 0.38,
+          ttl: 2.4,
+          curveRate: 0.52,
+          wallBounces: 1,
+          appliesFocusDrain: 12,
+          callout: "SYNC INVITE!"
+        });
+        fireEnemyProjectile(state, enemy, Math.cos(baseA + 0.3), Math.sin(baseA + 0.3), {
+          kind: "calendar_invite",
+          speed: 9.0,
+          damage: 11,
+          color: "#eab308",
+          radius: 0.38,
+          ttl: 2.4,
+          curveRate: -0.52,
+          wallBounces: 1,
+          appliesFocusDrain: 12,
+          callout: "SYNC INVITE!"
+        });
+      } else {
+        // Middle Manager flicks a wall-bouncing Calendar Invite!
+        fireEnemyProjectile(state, enemy, toX, toZ, {
+          kind: "calendar_invite",
+          speed: 8.8,
+          damage: 10,
+          color: "#f59e0b",
+          radius: 0.38,
+          ttl: 2.6,
+          wallBounces: 1,
+          appliesFocusDrain: 10,
+          callout: "QUICK SYNC!"
+        });
+      }
+    }
+    return;
+  }
+
+  // === TIER 4: 5 UNIQUE C-SUITE FLOOR BOSSES ===
+  rallyNearbyAllies(state, enemy, 8.5);
+  moveWithSlide(steerX, steerZ, speed);
+
+  if (enemy.abilityCooldown <= 0) {
+    const phase2 = enemy.bossPhase === 2;
+    enemy.volleyStep += 1;
+    enemy.castTimer = 0.5;
+    enemy.abilityCooldown = phase2 ? 2.35 : 3.05;
+    const step = enemy.volleyStep % 3;
+    const baseAngle = Math.atan2(toZ, toX);
+
+    if (enemy.typeId === "boss_cto") {
+      // CTO Chad Sterling: Rotating Server-Blade Spiral + Prod Outage Shockwave + P0 Bugs
+      if (step === 1) {
+        const blades = phase2 ? 8 : 6;
+        const spinOffset = enemy.volleyStep * 0.42;
+        for (let b = 0; b < blades; b += 1) {
+          const a = spinOffset + (b / blades) * Math.PI * 2;
+          fireEnemyProjectile(state, enemy, Math.cos(a), Math.sin(a), {
+            kind: "server_blade",
+            speed: phase2 ? 9.8 : 8.6,
+            damage: phase2 ? 12.5 : 10.5,
+            color: "#06b6d4",
+            radius: 0.42,
+            ttl: 2.5,
+            curveRate: phase2 ? 0.32 : 0.18,
+            appliesFocusDrain: 9,
+            callout: "SERVER BLADE!"
+          });
+        }
+      } else if (step === 2 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "shockwave",
+          ownerId: enemy.id,
+          x: enemy.x,
+          z: enemy.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: phase2 ? 4.8 : 4.0,
+          length: 0,
+          elapsed: 0,
+          duration: 0.78,
+          resolved: false,
+          color: "#06b6d4"
+        });
+        events.push({ type: "telegraph", x: enemy.x, z: enemy.z, color: "#06b6d4" });
+        if (phase2 && state.outage <= 0) {
+          state.outage = 7 * (1 - clamp(state.player.outageResist, 0, 0.65));
+          events.push({
+            type: "outage_start",
+            x: SERVER_STATION.x,
+            z: SERVER_STATION.z,
+            message: "CTO Chad triggered a Prod Outage! Reboot the IT Server Console!"
+          });
+        }
+      } else if (state.enemies.length < 22) {
+        spawnEnemy(state, "bug", rng, events, { x: enemy.x - 1.5, z: enemy.z + 1.2 });
+        spawnEnemy(state, "email", rng, events, { x: enemy.x + 1.5, z: enemy.z - 1.2 });
+      }
+      return;
+    }
+
+    if (enemy.typeId === "boss_hr") {
+      // Head of HR Diane Vance: Dual Policy Silence Rings + Sweeping Curved PIP Wave + HR Escorts
+      if (step === 1) {
+        const count = phase2 ? 6 : 4;
+        const swing = enemy.volleyStep % 2 === 0 ? 0.55 : -0.55;
+        for (let k = 0; k < count; k += 1) {
+          const frac = k / (count - 1) - 0.5;
+          const a = baseAngle + frac * 0.95;
+          fireEnemyProjectile(state, enemy, Math.cos(a), Math.sin(a), {
+            kind: "policy_memo",
+            speed: phase2 ? 9.6 : 8.4,
+            damage: phase2 ? 12 : 10,
+            color: "#c026d3",
+            radius: 0.4,
+            ttl: 2.4,
+            curveRate: swing,
+            appliesSilence: 2.0,
+            appliesFocusDrain: 11,
+            callout: "PERFORMANCE REVIEW!"
+          });
+        }
+      } else if (step === 2 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "policy_ring",
+          ownerId: enemy.id,
+          x: p.x,
+          z: p.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: phase2 ? 3.5 : 3.0,
+          length: 0,
+          elapsed: 0,
+          duration: 0.78,
+          resolved: false,
+          color: "#c026d3"
+        });
+        events.push({ type: "telegraph", x: p.x, z: p.z, color: "#c026d3" });
+      } else if (state.enemies.length < 22) {
+        spawnEnemy(state, "hr_specialist", rng, events, { x: enemy.x - 1.6, z: enemy.z + 1.2 });
+        spawnEnemy(state, "intern", rng, events, { x: enemy.x + 1.6, z: enemy.z - 1.2 });
+      }
+      return;
+    }
+
+    if (enemy.typeId === "boss_cfo") {
+      // CFO Victor Sterling-Hayes: 8-Way Gilded Audit Ledger Nova + Audit Tax Rings + IT Auditors
+      if (step === 1) {
+        const count = phase2 ? 10 : 8;
+        for (let k = 0; k < count; k += 1) {
+          const a = baseAngle + (k / count) * Math.PI * 2;
+          fireEnemyProjectile(state, enemy, Math.cos(a), Math.sin(a), {
+            kind: "audit_ledger",
+            speed: phase2 ? 9.0 : 8.0,
+            damage: phase2 ? 13 : 11,
+            color: "#10b981",
+            radius: 0.42,
+            ttl: 2.5,
+            curveRate: k % 2 === 0 ? 0.35 : -0.35,
+            appliesTax: 8,
+            appliesFocusDrain: 9,
+            callout: "TAX AUDIT!"
+          });
+        }
+      } else if (step === 2 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "tax_ring",
+          ownerId: enemy.id,
+          x: p.x,
+          z: p.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: phase2 ? 3.5 : 3.05,
+          length: 0,
+          elapsed: 0,
+          duration: 0.76,
+          resolved: false,
+          color: "#10b981"
+        });
+        events.push({ type: "telegraph", x: p.x, z: p.z, color: "#10b981" });
+      } else if (state.enemies.length < 22) {
+        spawnEnemy(state, "it_auditor", rng, events, { x: enemy.x - 1.6, z: enemy.z + 1.2 });
+        spawnEnemy(state, "analyst", rng, events, { x: enemy.x + 1.6, z: enemy.z - 1.2 });
+      }
+      return;
+    }
+
+    if (enemy.typeId === "boss_coo") {
+      // COO Elena Cross: Pincer Cross-Volleys + Sync Lock Ring + Manager Squad Drops
+      if (step === 1) {
+        const pairs = phase2 ? 3 : 2;
+        for (let k = 0; k < pairs; k += 1) {
+          const spread = 0.25 + k * 0.22;
+          fireEnemyProjectile(state, enemy, Math.cos(baseAngle - spread), Math.sin(baseAngle - spread), {
+            kind: "calendar_invite",
+            speed: 9.8,
+            damage: 12,
+            color: "#f97316",
+            radius: 0.4,
+            ttl: 2.5,
+            curveRate: 0.62,
+            wallBounces: 1,
+            appliesFocusDrain: 10,
+            callout: "OPS DIRECTIVE!"
+          });
+          fireEnemyProjectile(state, enemy, Math.cos(baseAngle + spread), Math.sin(baseAngle + spread), {
+            kind: "calendar_invite",
+            speed: 9.8,
+            damage: 12,
+            color: "#f97316",
+            radius: 0.4,
+            ttl: 2.5,
+            curveRate: -0.62,
+            wallBounces: 1,
+            appliesFocusDrain: 10,
+            callout: "OPS DIRECTIVE!"
+          });
+        }
+      } else if (step === 2 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
+        state.telegraphs.push({
+          id: nextId(state, "tg"),
+          kind: "meeting_ring",
+          ownerId: enemy.id,
+          x: p.x,
+          z: p.z,
+          dirX: 0,
+          dirZ: -1,
+          radius: phase2 ? 3.5 : 3.0,
+          length: 0,
+          elapsed: 0,
+          duration: 0.74,
+          resolved: false,
+          color: "#f97316"
+        });
+        events.push({ type: "telegraph", x: p.x, z: p.z, color: "#f97316" });
+      } else if (state.enemies.length < 22) {
+        spawnEnemy(state, "manager", rng, events, { x: enemy.x - 1.5, z: enemy.z + 1.2 });
+        spawnEnemy(state, "intern", rng, events, { x: enemy.x + 1.5, z: enemy.z - 1.2 });
+      }
+      return;
+    }
+
+    // CEO Arthur Pendelton (Floor 50 Final Boss): Imperial Rotating Golden Directives + Chained Executive Rings
+    if (step === 1) {
+      const count = phase2 ? 12 : 8;
+      const offset = enemy.volleyStep * 0.28;
+      for (let k = 0; k < count; k += 1) {
+        const a = offset + (k / count) * Math.PI * 2;
+        fireEnemyProjectile(state, enemy, Math.cos(a), Math.sin(a), {
+          kind: "exec_directive",
+          speed: phase2 ? 10.2 : 9.0,
+          damage: phase2 ? 14 : 12,
+          color: "#eab308",
+          radius: 0.44,
+          ttl: 2.6,
+          curveRate: phase2 ? 0.28 : 0,
+          appliesFocusDrain: 12,
+          callout: "EXECUTIVE ORDER!"
+        });
+      }
+    } else if (step === 2 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
       state.telegraphs.push({
         id: nextId(state, "tg"),
         kind: "meeting_ring",
@@ -2793,68 +3413,13 @@ function updateEnemyPolicy(
         z: p.z,
         dirX: 0,
         dirZ: -1,
-        radius: isSenior ? 2.7 : 2.35,
+        radius: phase2 ? 3.6 : 3.1,
         length: 0,
         elapsed: 0,
-        duration: 0.78,
+        duration: 0.76,
         resolved: false,
-        color: "#f59e0b"
+        color: "#eab308"
       });
-      if (isSenior) {
-        state.telegraphs.push({
-          id: nextId(state, "tg"),
-          kind: "meeting_ring",
-          ownerId: enemy.id,
-          x: p.x + p.facingX * 2.8,
-          z: p.z + p.facingZ * 2.8,
-          dirX: 0,
-          dirZ: -1,
-          radius: 2.35,
-          length: 0,
-          elapsed: 0,
-          duration: 0.92,
-          resolved: false,
-          color: "#fbbf24"
-        });
-      }
-      events.push({ type: "telegraph", x: p.x, z: p.z, color: "#f59e0b" });
-    }
-    return;
-  }
-
-  // C-Suite Floor Boss Policy (unique signature patterns per executive + Phase II enrage)
-  rallyNearbyAllies(state, enemy, 8.5);
-  moveWithSlide(steerX, steerZ, speed);
-
-  if (enemy.abilityCooldown <= 0) {
-    const phase2 = enemy.bossPhase === 2;
-    enemy.abilityCooldown = phase2 ? 2.45 : 3.25;
-    const roll = rng();
-
-    if (roll < 0.48 && countActiveTelegraphs(state) < MAX_CONCURRENT_TELEGRAPHS) {
-      const tgKind =
-        enemy.typeId === "boss_hr"
-          ? "policy_ring"
-          : enemy.typeId === "boss_cfo"
-          ? "tax_ring"
-          : "meeting_ring";
-
-      state.telegraphs.push({
-        id: nextId(state, "tg"),
-        kind: tgKind,
-        ownerId: enemy.id,
-        x: p.x,
-        z: p.z,
-        dirX: 0,
-        dirZ: -1,
-        radius: phase2 ? 3.5 : 3.05,
-        length: 0,
-        elapsed: 0,
-        duration: phase2 ? 0.74 : 0.84,
-        resolved: false,
-        color: phase2 ? "#ef4444" : def.accentColor
-      });
-
       if (phase2) {
         state.telegraphs.push({
           id: nextId(state, "tg"),
@@ -2864,58 +3429,18 @@ function updateEnemyPolicy(
           z: enemy.z,
           dirX: 0,
           dirZ: -1,
-          radius: 4.4,
+          radius: 4.8,
           length: 0,
           elapsed: 0,
-          duration: 0.78,
+          duration: 0.8,
           resolved: false,
           color: "#ef4444"
         });
       }
-      events.push({ type: "telegraph", x: p.x, z: p.z, color: def.accentColor });
-    } else if (roll < 0.84) {
-      const baseAngle = Math.atan2(toZ, toX);
-      const offsets =
-        enemy.typeId === "boss_ceo" && phase2
-          ? [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6]
-          : phase2
-          ? [-0.52, -0.26, 0, 0.26, 0.52]
-          : [-0.32, 0, 0.32];
-      for (const offset of offsets) {
-        const a = baseAngle + offset;
-        fireEnemyBolt(
-          state,
-          enemy,
-          Math.cos(a),
-          Math.sin(a),
-          phase2 ? 11.6 : 10.4,
-          phase2 ? 13 : 11,
-          phase2 ? "#ef4444" : def.accentColor,
-          0.36
-        );
-      }
-    } else if (state.enemies.length < 24) {
-      const escort: EnemyTypeId =
-        enemy.typeId === "boss_hr"
-          ? "hr_specialist"
-          : enemy.typeId === "boss_cfo"
-          ? "it_auditor"
-          : enemy.typeId === "boss_cto"
-          ? "bug"
-          : enemy.typeId === "boss_ceo"
-          ? "manager"
-          : "intern";
-      spawnEnemy(state, escort, rng, events, { x: enemy.x - 1.5, z: enemy.z + 1.2 });
-      spawnEnemy(state, "intern", rng, events, { x: enemy.x + 1.5, z: enemy.z - 1.2 });
-      if (enemy.typeId === "boss_cto" && phase2 && state.outage <= 0) {
-        state.outage = 7 * (1 - clamp(state.player.outageResist, 0, 0.65));
-        events.push({
-          type: "outage_start",
-          x: SERVER_STATION.x,
-          z: SERVER_STATION.z,
-          message: "CTO Chad triggered a Prod Outage! Reboot the IT Server Console!"
-        });
-      }
+      events.push({ type: "telegraph", x: p.x, z: p.z, color: "#eab308" });
+    } else if (state.enemies.length < 22) {
+      spawnEnemy(state, "manager", rng, events, { x: enemy.x - 1.6, z: enemy.z + 1.2 });
+      spawnEnemy(state, "analyst", rng, events, { x: enemy.x + 1.6, z: enemy.z - 1.2 });
     }
   }
 }

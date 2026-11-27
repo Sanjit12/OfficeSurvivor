@@ -11,6 +11,7 @@ import type {
   TelegraphEntity
 } from "../game/types";
 import {
+  buildEnemyProjectileMesh,
   buildOfficeWeaponMesh,
   createDroneMesh,
   createEmployeeRig,
@@ -82,6 +83,7 @@ export class WorldRenderer {
   private readonly telegraphMeshes = new Map<string, THREE.Group>();
   private readonly hazardMeshes = new Map<string, THREE.Group>();
   private readonly weaponProjectileMeshes = new Map<string, THREE.Group>();
+  private readonly enemyProjectileMeshes = new Map<string, THREE.Group>();
 
   // Zero-GC Instanced Pools
   private readonly particleMesh: THREE.InstancedMesh;
@@ -561,6 +563,8 @@ export class WorldRenderer {
     this.hazardMeshes.clear();
     for (const mesh of this.weaponProjectileMeshes.values()) this.scene.remove(mesh);
     this.weaponProjectileMeshes.clear();
+    for (const mesh of this.enemyProjectileMeshes.values()) this.scene.remove(mesh);
+    this.enemyProjectileMeshes.clear();
     this.aimReticle.visible = false;
 
     this._dummy.scale.set(0, 0, 0);
@@ -916,8 +920,12 @@ export class WorldRenderer {
             rig.leftArm.userData.baseRotX = rig.leftArm.rotation.x;
             rig.rightArm.userData.baseRotX = rig.rightArm.rotation.x;
           }
-          rig.leftArm.rotation.x = (rig.leftArm.userData.baseRotX as number) - armSwing;
-          rig.rightArm.rotation.x = (rig.rightArm.userData.baseRotX as number) + armSwing;
+          const castLift =
+            enemy.castTimer > 0
+              ? Math.sin(THREE.MathUtils.clamp(enemy.castTimer / 0.36, 0, 1) * Math.PI) * 1.05
+              : 0;
+          rig.leftArm.rotation.x = (rig.leftArm.userData.baseRotX as number) - armSwing + castLift * 0.55;
+          rig.rightArm.rotation.x = (rig.rightArm.userData.baseRotX as number) + armSwing + castLift;
         }
         if (rig.wingLeft && rig.wingRight) {
           const flap = Math.sin(enemy.walkPhase * 3.5) * 0.55;
@@ -944,6 +952,9 @@ export class WorldRenderer {
           } else if (enemy.aiPhase === "windup" || (enemy.boss && enemy.bossPhase === 2)) {
             mat.emissive.set("#ef4444");
             mat.emissiveIntensity = enemy.aiPhase === "windup" ? 0.95 : 0.55;
+          } else if (enemy.castTimer > 0 && idx === 1) {
+            mat.emissive.copy(rig.baseEmissives[idx]);
+            mat.emissiveIntensity = 1.15;
           } else {
             mat.emissive.copy(rig.baseEmissives[idx]);
             mat.emissiveIntensity = idx === 1 ? 0.45 : 0;
@@ -1085,8 +1096,9 @@ export class WorldRenderer {
       }
     }
 
-    // 9. Sync Projectiles: 3D Spinning Office Items for Player Weapons + InstancedMesh for Enemy/Drone Bolts
+    // 9. Sync Projectiles: 3D Office Weapons (Player) + 10 Distinct 3D Corporate Projectiles (Enemies) + InstancedMesh (Drones)
     const activeWeaponShots = new Set<string>();
+    const activeEnemyShots = new Set<string>();
     let instIdx = 0;
     for (let i = 0; i < state.projectiles.length; i += 1) {
       const shot = state.projectiles[i];
@@ -1102,6 +1114,34 @@ export class WorldRenderer {
         const sc = shot.evolved ? 1.25 : shot.crit ? 1.16 : 1.0;
         mesh.scale.setScalar(sc);
         mesh.rotation.set(state.elapsed * 7, state.elapsed * 13, state.elapsed * 4);
+      } else if (shot.fromEnemy && shot.enemyKind) {
+        activeEnemyShots.add(shot.id);
+        let mesh = this.enemyProjectileMeshes.get(shot.id);
+        if (!mesh) {
+          mesh = buildEnemyProjectileMesh(shot.enemyKind);
+          this.scene.add(mesh);
+          this.enemyProjectileMeshes.set(shot.id, mesh);
+        }
+        let y = 1.04 + Math.sin(state.elapsed * 9 + i) * 0.05;
+        if (shot.arcHeight && shot.arcHeight > 0) {
+          const maxT = Math.max(0.1, shot.maxTtl || 1);
+          const progress = THREE.MathUtils.clamp(1 - shot.ttl / maxT, 0, 1);
+          y = 0.72 + Math.sin(progress * Math.PI) * shot.arcHeight;
+        }
+        mesh.position.set(shot.x, y, shot.z);
+
+        const kind = shot.enemyKind;
+        if (kind === "coffee_cup") {
+          mesh.rotation.set(state.elapsed * 8.5, Math.atan2(shot.vx, shot.vz), state.elapsed * 4.5);
+        } else if (kind === "firewall_disc") {
+          mesh.rotation.set(0, state.elapsed * 16, 0);
+        } else if (kind === "server_blade" || kind === "exec_directive" || kind === "code_review") {
+          const heading = Math.atan2(shot.vx, shot.vz);
+          mesh.rotation.set(0, heading, Math.sin(state.elapsed * 11 + i) * 0.35);
+        } else {
+          // Flat spinning frisbee glide for spreadsheets, kanban cards, policy memos, calendar invites & audit ledgers
+          mesh.rotation.set(0.16, state.elapsed * 9.5, Math.sin(state.elapsed * 6 + i) * 0.14);
+        }
       } else if (instIdx < MAX_PROJECTILES) {
         this._dummy.position.set(shot.x, 1.02, shot.z);
         const sc = shot.fromEnemy ? 1.25 : shot.evolved ? 1.38 : shot.crit ? 1.25 : 0.92;
@@ -1118,6 +1158,12 @@ export class WorldRenderer {
       if (!activeWeaponShots.has(id)) {
         this.scene.remove(mesh);
         this.weaponProjectileMeshes.delete(id);
+      }
+    }
+    for (const [id, mesh] of this.enemyProjectileMeshes.entries()) {
+      if (!activeEnemyShots.has(id)) {
+        this.scene.remove(mesh);
+        this.enemyProjectileMeshes.delete(id);
       }
     }
     for (let i = instIdx; i < MAX_PROJECTILES; i += 1) {

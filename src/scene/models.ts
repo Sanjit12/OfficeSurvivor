@@ -3,6 +3,7 @@ import { ENEMY_ARCHETYPES } from "../game/data";
 import type {
   EmployeeClassDef,
   EnemyArchetypeDef,
+  EnemyProjectileKind,
   EnemyTypeId,
   HumanoidHairStyle,
   HumanoidPropStyle,
@@ -82,23 +83,23 @@ function makeContactShadow(shadowTexture: THREE.Texture, radius: number): THREE.
 }
 
 const NAMEPLATE_LABELS: Record<EnemyTypeId, { label: string; sub: string }> = {
-  email: { label: "EMAIL", sub: "SWARM" },
+  email: { label: "EMAIL", sub: "REPLY HOP" },
   bug: { label: "P0 BUG", sub: "CHARGER" },
-  intern: { label: "INTERN", sub: "JUNIOR" },
-  analyst: { label: "ANALYST", sub: "RANGED" },
-  tech_lead: { label: "★ TECH LEAD", sub: "RALLY AURA" },
-  product_lead: { label: "★ PRODUCT LEAD", sub: "SPAWNER" },
-  hr_specialist: { label: "★ HR SPECIALIST", sub: "SILENCE" },
-  it_auditor: { label: "★ IT AUDITOR", sub: "FRONT SHIELD" },
-  manager: { label: "★★ MANAGER", sub: "SYNC LOCK" },
-  senior_manager: { label: "★★ SR. MANAGER", sub: "ELITE RALLY" },
-  hr_director: { label: "★★ HR DIRECTOR", sub: "PIP ZONE" },
-  vp_ops: { label: "★★ VP OF OPS", sub: "HEAVY SLAM" },
-  boss_cto: { label: "♛ CTO CHAD", sub: "C-SUITE BOSS" },
-  boss_hr: { label: "♛ HEAD OF HR", sub: "C-SUITE BOSS" },
-  boss_cfo: { label: "♛ CFO VICTOR", sub: "C-SUITE BOSS" },
-  boss_coo: { label: "♛ COO ELENA", sub: "C-SUITE BOSS" },
-  boss_ceo: { label: "♛ CEO ARTHUR", sub: "FINAL BOSS" }
+  intern: { label: "INTERN", sub: "COFFEE TOSS" },
+  analyst: { label: "ANALYST", sub: "SPREADSHEETS" },
+  tech_lead: { label: "★ TECH LEAD", sub: "RALLY + PR FAN" },
+  product_lead: { label: "★ PRODUCT LEAD", sub: "KANBAN + SUMMON" },
+  hr_specialist: { label: "★ HR SPECIALIST", sub: "HR SILENCE" },
+  it_auditor: { label: "★ IT AUDITOR", sub: "SHIELD + DISC" },
+  manager: { label: "★★ MANAGER", sub: "SYNC + INVITE" },
+  senior_manager: { label: "★★ SR. MANAGER", sub: "DUAL INVITE" },
+  hr_director: { label: "★★ HR DIRECTOR", sub: "PIP WAVE" },
+  vp_ops: { label: "★★ VP OF OPS", sub: "CHARGE + SLAM" },
+  boss_cto: { label: "♛ CTO CHAD", sub: "SERVER BLADES" },
+  boss_hr: { label: "♛ HEAD OF HR", sub: "PIP STORM" },
+  boss_cfo: { label: "♛ CFO VICTOR", sub: "AUDIT LEDGERS" },
+  boss_coo: { label: "♛ COO ELENA", sub: "OPS PINCER" },
+  boss_ceo: { label: "♛ CEO ARTHUR", sub: "EXEC DECREE" }
 };
 
 const NAMEPLATE_TEXTURE_CACHE = new Map<EnemyTypeId, THREE.CanvasTexture>();
@@ -391,6 +392,207 @@ export function buildOfficeWeaponMesh(
     const projScale = weaponId === "monitor" ? 1.15 : weaponId === "keyboard" ? 0.95 : 1.1;
     g.scale.setScalar(projScale);
   }
+  return g;
+}
+
+const HEX_DISC_GEO = new THREE.CylinderGeometry(0.46, 0.46, 0.08, 6);
+const HEX_CORE_GEO = new THREE.CylinderGeometry(0.26, 0.26, 0.11, 6);
+
+export function buildEnemyProjectileMesh(kind: EnemyProjectileKind): THREE.Group {
+  const g = new THREE.Group();
+  const paperMat = new THREE.MeshStandardMaterial({ color: "#f8fafc", roughness: 0.78, metalness: 0.04 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: "#1e293b", roughness: 0.46, metalness: 0.45 });
+  const steelMat = new THREE.MeshStandardMaterial({ color: "#cbd5e1", roughness: 0.25, metalness: 0.85 });
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: "#facc15",
+    emissive: "#ca8a04",
+    emissiveIntensity: 0.42,
+    roughness: 0.24,
+    metalness: 0.86
+  });
+
+  switch (kind) {
+    case "spreadsheet": {
+      // Flying Excel sheet with green header bar, dark grid lines & rising 3D bar chart
+      const greenMat = new THREE.MeshStandardMaterial({
+        color: "#16a34a",
+        emissive: "#15803d",
+        emissiveIntensity: 0.35,
+        roughness: 0.4
+      });
+      const chartAmber = new THREE.MeshStandardMaterial({ color: "#f59e0b", roughness: 0.35 });
+      g.add(scaledMesh(UNIT_BOX, paperMat, 0.68, 0.045, 0.54, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, greenMat, 0.68, 0.055, 0.14, 0, 0.008, -0.2));
+      g.add(scaledMesh(UNIT_BOX, darkMat, 0.56, 0.052, 0.03, 0, 0.005, 0.0));
+      g.add(scaledMesh(UNIT_BOX, darkMat, 0.56, 0.052, 0.03, 0, 0.005, 0.13));
+      // Mini 3D chart columns popping off the corner
+      g.add(scaledMesh(UNIT_BOX, greenMat, 0.07, 0.14, 0.07, -0.16, 0.09, 0.06));
+      g.add(scaledMesh(UNIT_BOX, chartAmber, 0.07, 0.22, 0.07, -0.05, 0.13, 0.06));
+      break;
+    }
+    case "kanban_card": {
+      // Boomerang golden sticky note with priority ribbon and red pin
+      const noteMat = new THREE.MeshStandardMaterial({
+        color: "#facc15",
+        emissive: "#d97706",
+        emissiveIntensity: 0.28,
+        roughness: 0.65
+      });
+      const ribbonMat = new THREE.MeshStandardMaterial({ color: "#ea580c", roughness: 0.42 });
+      const pinMat = new THREE.MeshStandardMaterial({ color: "#ef4444", roughness: 0.28, metalness: 0.2 });
+      g.add(scaledMesh(UNIT_BOX, noteMat, 0.6, 0.045, 0.6, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, ribbonMat, 0.6, 0.055, 0.12, 0, 0.006, -0.22));
+      g.add(scaledMesh(UNIT_BOX, darkMat, 0.42, 0.052, 0.035, 0, 0.004, 0.0));
+      g.add(scaledMesh(UNIT_BOX, darkMat, 0.34, 0.052, 0.035, -0.04, 0.004, 0.12));
+      g.add(scaledMesh(UNIT_SPHERE, pinMat, 0.12, 0.12, 0.12, 0, 0.06, -0.22));
+      break;
+    }
+    case "code_review": {
+      // Sleek dark PR ticket card with teal bar and bold red rejection X
+      const tealMat = new THREE.MeshStandardMaterial({
+        color: "#14b8a6",
+        emissive: "#0d9488",
+        emissiveIntensity: 0.45,
+        roughness: 0.3
+      });
+      const redMat = new THREE.MeshStandardMaterial({
+        color: "#ef4444",
+        emissive: "#dc2626",
+        emissiveIntensity: 0.55,
+        roughness: 0.28
+      });
+      g.add(scaledMesh(UNIT_BOX, darkMat, 0.54, 0.06, 0.72, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, tealMat, 0.56, 0.07, 0.14, 0, 0.005, -0.28));
+      const xA = scaledMesh(UNIT_BOX, redMat, 0.36, 0.08, 0.065, 0, 0.015, 0.06);
+      xA.rotation.y = Math.PI / 4;
+      const xB = scaledMesh(UNIT_BOX, redMat, 0.36, 0.08, 0.065, 0, 0.015, 0.06);
+      xB.rotation.y = -Math.PI / 4;
+      g.add(xA, xB);
+      break;
+    }
+    case "coffee_cup": {
+      // Arcing hot takeaway coffee cup with cardboard sleeve, lid & dark splash crest
+      const sleeveMat = new THREE.MeshStandardMaterial({ color: "#b45309", roughness: 0.85 });
+      const splashMat = new THREE.MeshStandardMaterial({
+        color: "#451a03",
+        emissive: "#78350f",
+        emissiveIntensity: 0.25,
+        roughness: 0.2
+      });
+      g.add(scaledMesh(UNIT_CYL, paperMat, 0.36, 0.52, 0.36, 0, 0, 0));
+      g.add(scaledMesh(UNIT_CYL, sleeveMat, 0.39, 0.22, 0.39, 0, -0.02, 0));
+      g.add(scaledMesh(UNIT_CYL, darkMat, 0.4, 0.09, 0.4, 0, 0.28, 0));
+      g.add(scaledMesh(UNIT_SPHERE, splashMat, 0.22, 0.16, 0.22, 0.08, 0.38, 0));
+      g.add(scaledMesh(UNIT_SPHERE, splashMat, 0.12, 0.12, 0.12, -0.12, 0.44, 0.06));
+      break;
+    }
+    case "policy_memo": {
+      // Stamped HR compliance dossier with purple folder, cream pages & red PIP seal
+      const folderMat = new THREE.MeshStandardMaterial({
+        color: "#9333ea",
+        emissive: "#6b21a8",
+        emissiveIntensity: 0.32,
+        roughness: 0.5
+      });
+      const sealMat = new THREE.MeshStandardMaterial({
+        color: "#f43f5e",
+        emissive: "#e11d48",
+        emissiveIntensity: 0.55,
+        roughness: 0.25
+      });
+      g.add(scaledMesh(UNIT_BOX, folderMat, 0.68, 0.08, 0.54, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, paperMat, 0.62, 0.09, 0.46, 0.03, 0.008, 0));
+      g.add(scaledMesh(UNIT_CYL, sealMat, 0.22, 0.11, 0.22, 0.12, 0.02, 0.08));
+      g.add(scaledMesh(UNIT_BOX, goldMat, 0.18, 0.11, 0.07, -0.2, 0.02, -0.24));
+      break;
+    }
+    case "calendar_invite": {
+      // Bouncing Outlook/Calendar invite tile with amber date header & busy blocks
+      const headerMat = new THREE.MeshStandardMaterial({
+        color: "#f59e0b",
+        emissive: "#d97706",
+        emissiveIntensity: 0.45,
+        roughness: 0.32
+      });
+      const alertMat = new THREE.MeshStandardMaterial({
+        color: "#ef4444",
+        emissive: "#dc2626",
+        emissiveIntensity: 0.5,
+        roughness: 0.3
+      });
+      g.add(scaledMesh(UNIT_BOX, paperMat, 0.64, 0.065, 0.62, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, headerMat, 0.66, 0.075, 0.18, 0, 0.006, -0.22));
+      g.add(scaledMesh(UNIT_CYL, steelMat, 0.065, 0.12, 0.065, -0.18, 0.03, -0.31));
+      g.add(scaledMesh(UNIT_CYL, steelMat, 0.065, 0.12, 0.065, 0.18, 0.03, -0.31));
+      g.add(scaledMesh(UNIT_BOX, headerMat, 0.22, 0.075, 0.12, -0.12, 0.006, 0.04));
+      g.add(scaledMesh(UNIT_BOX, alertMat, 0.24, 0.08, 0.14, 0.12, 0.01, 0.14));
+      break;
+    }
+    case "firewall_disc": {
+      // Heavy hexagonal spinning IT security firewall buckler disc
+      const rimMat = new THREE.MeshStandardMaterial({
+        color: "#38bdf8",
+        emissive: "#0284c7",
+        emissiveIntensity: 0.65,
+        roughness: 0.24,
+        metalness: 0.55
+      });
+      const outer = new THREE.Mesh(HEX_DISC_GEO, rimMat);
+      const core = new THREE.Mesh(HEX_CORE_GEO, darkMat);
+      g.add(outer, core);
+      g.add(scaledMesh(UNIT_BOX, steelMat, 0.86, 0.05, 0.09, 0, 0.03, 0));
+      g.add(scaledMesh(UNIT_BOX, steelMat, 0.09, 0.05, 0.86, 0, 0.03, 0));
+      break;
+    }
+    case "server_blade": {
+      // 1U rackmount server blade with silver rack ears, cyan status LEDs & twin fan rings
+      const chassisMat = new THREE.MeshStandardMaterial({ color: "#0f172a", roughness: 0.32, metalness: 0.78 });
+      const ledMat = new THREE.MeshStandardMaterial({
+        color: "#06b6d4",
+        emissive: "#06b6d4",
+        emissiveIntensity: 0.95,
+        roughness: 0.2
+      });
+      g.add(scaledMesh(UNIT_BOX, chassisMat, 0.52, 0.14, 0.8, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, steelMat, 0.62, 0.12, 0.07, 0, 0, -0.38));
+      g.add(scaledMesh(UNIT_BOX, ledMat, 0.36, 0.05, 0.05, 0, 0.02, -0.41));
+      g.add(scaledMesh(UNIT_CYL, steelMat, 0.2, 0.16, 0.2, 0, 0.01, -0.08));
+      g.add(scaledMesh(UNIT_CYL, ledMat, 0.2, 0.16, 0.2, 0, 0.01, 0.18));
+      break;
+    }
+    case "audit_ledger": {
+      // Heavy gilded emerald-green accounting ledger book with cream pages & gold clasp
+      const coverMat = new THREE.MeshStandardMaterial({
+        color: "#059669",
+        emissive: "#047857",
+        emissiveIntensity: 0.3,
+        roughness: 0.42,
+        metalness: 0.22
+      });
+      const creamMat = new THREE.MeshStandardMaterial({ color: "#fef3c7", roughness: 0.85 });
+      g.add(scaledMesh(UNIT_BOX, coverMat, 0.64, 0.16, 0.52, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, creamMat, 0.58, 0.11, 0.48, 0.04, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, goldMat, 0.1, 0.18, 0.53, -0.28, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, goldMat, 0.22, 0.18, 0.22, 0.04, 0.01, 0));
+      break;
+    }
+    case "exec_directive": {
+      // Imperial obsidian-and-gold executive decree tablet with crimson ribbon & medallion
+      const obsidianMat = new THREE.MeshStandardMaterial({ color: "#1e1b4b", roughness: 0.28, metalness: 0.62 });
+      const crimsonMat = new THREE.MeshStandardMaterial({
+        color: "#dc2626",
+        emissive: "#b91c1c",
+        emissiveIntensity: 0.45,
+        roughness: 0.32
+      });
+      g.add(scaledMesh(UNIT_BOX, goldMat, 0.62, 0.08, 0.82, 0, 0, 0));
+      g.add(scaledMesh(UNIT_BOX, obsidianMat, 0.5, 0.1, 0.7, 0, 0.005, 0));
+      g.add(scaledMesh(UNIT_BOX, crimsonMat, 0.14, 0.12, 0.76, 0, 0.01, 0));
+      g.add(scaledMesh(UNIT_CYL, goldMat, 0.22, 0.14, 0.22, 0, 0.02, -0.06));
+      break;
+    }
+  }
+
   return g;
 }
 

@@ -53,6 +53,7 @@ import {
   rebindKeyAction
 } from "./settings";
 import { getEmployeePortraitSvg, getEnemyPortraitSvg, getWeaponIconSvg } from "../ui/portraits";
+import { combineMoveVectors, computeFpsStickLookDelta, computeJoystickVector } from "./joystick";
 import type { InputSnapshot } from "./types";
 
 const idleInput: InputSnapshot = {
@@ -565,5 +566,181 @@ test("all 10 selectable office item weapons have SVG art, distinct firing patter
   assert.ok(monState.player.pierce >= 1);
   assert.ok(monState.weapon.damageMult >= 2.0);
 });
+
+test("enemies have weighted per-type spawn rates, per-type spawn cooldowns, and distinct corporate attack powers", () => {
+  // Every non-boss archetype has distinct positive spawnWeight; higher-tier units have longer spawnCooldown
+  for (const arch of HIERARCHY_LIST) {
+    if (!arch.boss) {
+      assert.ok(arch.spawnWeight > 0, `${arch.id} should have positive spawnWeight`);
+      assert.ok(arch.spawnCooldown >= 0, `${arch.id} should have non-negative spawnCooldown`);
+    }
+  }
+  assert.ok(ENEMY_ARCHETYPES.email.spawnWeight > ENEMY_ARCHETYPES.bug.spawnWeight);
+  assert.ok(ENEMY_ARCHETYPES.manager.spawnCooldown > ENEMY_ARCHETYPES.tech_lead.spawnCooldown);
+
+  // Weighted Tier-1 sampling spawns common emails/interns more often than heavy bugs
+  const save = createDefaultSave();
+  const spawnState = createGameState(save, "junior", 1, "standard");
+  let seed = 4242;
+  const rng = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  const tier1Counts: Record<string, number> = { email: 0, intern: 0, analyst: 0, bug: 0 };
+  for (let i = 0; i < 300; i += 1) {
+    const picked = pickEnemyArchetype(spawnState, rng);
+    if (picked in tier1Counts) tier1Counts[picked] += 1;
+  }
+  assert.ok(
+    tier1Counts.email + tier1Counts.intern > tier1Counts.bug * 2.5,
+    `Expected common emails/interns (${tier1Counts.email + tier1Counts.intern}) to outnumber bugs (${tier1Counts.bug})`
+  );
+
+  // Spawning a specialist sets its per-enemy spawn cooldown and blocks immediate repeat
+  spawnEnemy(spawnState, "tech_lead", rng);
+  assert.ok(
+    (spawnState.enemySpawnCooldowns.tech_lead ?? 0) >= ENEMY_ARCHETYPES.tech_lead.spawnCooldown * 0.9,
+    "Spawning tech_lead should set its spawnCooldown"
+  );
+
+  // Intern lobs arcing coffee_cup that splatters into a slowing coffee_spill puddle
+  const internState = createGameState(save, "junior", 1, "standard");
+  internState.player.invuln = 99;
+  internState.player.shootTimer = 99;
+  const intern = spawnEnemy(internState, "intern", rng, [], { x: 5.5, z: 0 });
+  intern.abilityCooldown = 0;
+  stepSimulation(internState, save, 0.05, idleInput, rng);
+  const cup = internState.projectiles.find((p) => p.fromEnemy && p.enemyKind === "coffee_cup");
+  assert.ok(cup, "Intern should lob a 3D coffee_cup projectile");
+  assert.ok((cup!.arcHeight ?? 0) > 1.5, "Intern coffee_cup should travel on a parabolic arc");
+  assert.equal(cup!.spawnsHazard, "coffee_spill");
+  // Let the cup finish its arc and splatter
+  cup!.ttl = 0.02;
+  stepSimulation(internState, save, 0.05, idleInput, rng);
+  assert.ok(
+    internState.hazards.some((h) => h.kind === "coffee_spill"),
+    "Landing coffee_cup should spawn a coffee_spill hazard"
+  );
+
+  // Junior Analyst fires 2 spreadsheets
+  const analystState = createGameState(save, "junior", 1, "standard");
+  analystState.player.invuln = 99;
+  analystState.player.shootTimer = 99;
+  const analyst = spawnEnemy(analystState, "analyst", rng, [], { x: 6.5, z: 0 });
+  analyst.abilityCooldown = 0;
+  stepSimulation(analystState, save, 0.05, idleInput, rng);
+  const sheets = analystState.projectiles.filter((p) => p.fromEnemy && p.enemyKind === "spreadsheet");
+  assert.equal(sheets.length, 2, `Expected 2 spreadsheets from Analyst, got ${sheets.length}`);
+
+  // Tech Lead fires 3 code_review cards
+  const techState = createGameState(save, "junior", 1, "standard");
+  techState.player.invuln = 99;
+  techState.player.shootTimer = 99;
+  const techLead = spawnEnemy(techState, "tech_lead", rng, [], { x: 6.5, z: 0 });
+  techLead.abilityCooldown = 0;
+  stepSimulation(techState, save, 0.05, idleInput, rng);
+  const reviews = techState.projectiles.filter((p) => p.fromEnemy && p.enemyKind === "code_review");
+  assert.equal(reviews.length, 3, `Expected 3 code_review cards from Tech Lead, got ${reviews.length}`);
+
+  // Product Lead throws 2 curving boomerang kanban_card tickets
+  const pmState = createGameState(save, "junior", 1, "standard");
+  pmState.player.invuln = 99;
+  pmState.player.shootTimer = 99;
+  const pm = spawnEnemy(pmState, "product_lead", rng, [], { x: 7.0, z: 0 });
+  pm.abilityCooldown = 0;
+  stepSimulation(pmState, save, 0.05, idleInput, rng);
+  const kanbans = pmState.projectiles.filter((p) => p.fromEnemy && p.enemyKind === "kanban_card");
+  assert.equal(kanbans.length, 2, `Expected 2 curving kanban_cards from Product Lead, got ${kanbans.length}`);
+  assert.ok(kanbans.every((k) => Math.abs(k.curveRate ?? 0) > 0.3));
+
+  // Manager flicks a wall-bouncing calendar_invite + Sync Ring
+  const mgrState = createGameState(save, "junior", 1, "standard");
+  mgrState.player.invuln = 99;
+  mgrState.player.shootTimer = 99;
+  const mgr = spawnEnemy(mgrState, "manager", rng, [], { x: 6.8, z: 0 });
+  mgr.abilityCooldown = 0;
+  stepSimulation(mgrState, save, 0.05, idleInput, rng);
+  const invite = mgrState.projectiles.find((p) => p.fromEnemy && p.enemyKind === "calendar_invite");
+  assert.ok(invite, "Manager should throw a calendar_invite");
+  assert.ok((invite!.wallBounces ?? 0) >= 1, "Manager calendar_invite should bounce off walls");
+
+  // HR Specialist throws a silencing policy_memo
+  const hrState = createGameState(save, "junior", 1, "standard");
+  hrState.player.invuln = 99;
+  hrState.player.shootTimer = 99;
+  const hr = spawnEnemy(hrState, "hr_specialist", rng, [], { x: 6.5, z: 0 });
+  hr.abilityCooldown = 0;
+  stepSimulation(hrState, save, 0.05, idleInput, rng);
+  const memo = hrState.projectiles.find((p) => p.fromEnemy && p.enemyKind === "policy_memo");
+  assert.ok(memo && (memo.appliesSilence ?? 0) > 0, "HR Specialist should throw a silencing policy_memo");
+
+  // IT Auditor throws a spinning firewall_disc at midrange
+  const itState = createGameState(save, "junior", 1, "standard");
+  itState.player.invuln = 99;
+  itState.player.shootTimer = 99;
+  const auditor = spawnEnemy(itState, "it_auditor", rng, [], { x: 7.0, z: 0 });
+  auditor.abilityCooldown = 0;
+  stepSimulation(itState, save, 0.05, idleInput, rng);
+  assert.ok(
+    itState.projectiles.some((p) => p.fromEnemy && p.enemyKind === "firewall_disc"),
+    "IT Auditor should throw a firewall_disc at midrange"
+  );
+
+  // All 5 C-Suite bosses fire their unique signature 3D corporate projectile kinds
+  const bossExpectations: Array<[typeof HIERARCHY_LIST[number]["id"], string]> = [
+    ["boss_cto", "server_blade"],
+    ["boss_hr", "policy_memo"],
+    ["boss_cfo", "audit_ledger"],
+    ["boss_coo", "calendar_invite"],
+    ["boss_ceo", "exec_directive"]
+  ];
+  for (const [bossId, expectedKind] of bossExpectations) {
+    const bState = createGameState(save, "senior", 1, "standard");
+    bState.player.invuln = 99;
+    bState.player.shootTimer = 99;
+    const boss = spawnEnemy(bState, bossId, rng, [], { x: 6.0, z: 0 });
+    boss.abilityCooldown = 0;
+    stepSimulation(bState, save, 0.05, idleInput, rng);
+    const bossShots = bState.projectiles.filter((p) => p.fromEnemy && p.enemyKind === expectedKind);
+    assert.ok(
+      bossShots.length >= 4,
+      `Expected ${bossId} to fire >=4 ${expectedKind} projectiles, got ${bossShots.length}`
+    );
+  }
+});
+
+test("mobile virtual joystick math handles deadzone, clamping, combined movement, and FPS look", () => {
+  // Inside deadzone produces zero output and inactive state
+  const inside = computeJoystickVector(3, 2, 40, 0.15);
+  assert.equal(inside.active, false);
+  assert.equal(inside.x, 0);
+  assert.equal(inside.y, 0);
+
+  // Full pull beyond maxRadius clamps cleanly to magnitude 1 and knob radius
+  const fullRight = computeJoystickVector(120, 0, 40, 0.12);
+  assert.equal(fullRight.active, true);
+  assert.ok(Math.abs(fullRight.x - 1) < 1e-6);
+  assert.ok(Math.abs(fullRight.y) < 1e-6);
+  assert.ok(Math.abs(fullRight.knobX - 40) < 1e-6);
+
+  // Diagonal pull beyond radius normalizes cleanly
+  const diag = computeJoystickVector(60, -60, 40, 0.12);
+  assert.equal(diag.active, true);
+  assert.ok(Math.abs(Math.hypot(diag.x, diag.y) - 1) < 1e-6);
+  assert.ok(Math.abs(Math.hypot(diag.knobX, diag.knobY) - 40) < 1e-6);
+
+  // Combining keyboard + joystick never exceeds magnitude 1
+  const combined = combineMoveVectors(1, 0, 1, 1);
+  assert.ok(Math.hypot(combined.moveX, combined.moveZ) <= 1.0001);
+
+  // FPS right-stick look rotates yaw left/right and pitch up/down smoothly
+  const lookRight = computeFpsStickLookDelta(1, 0, 1.0, 0.1);
+  assert.ok(lookRight.dYaw < 0, "Pushing right stick right should turn yaw clockwise (negative)");
+  assert.equal(lookRight.dPitch, 0);
+  const lookUp = computeFpsStickLookDelta(0, -1, 1.0, 0.1);
+  assert.ok(lookUp.dPitch > 0, "Pushing right stick up should pitch camera upward");
+});
+
+
 
 

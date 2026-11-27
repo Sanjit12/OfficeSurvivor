@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Office Survivor</title>
     <meta
@@ -229,6 +229,45 @@
           </div>
           <canvas id="minimapCanvas" width="210" height="162"></canvas>
         </aside>
+
+        <!-- Mobile Dual Virtual Joysticks (Visible on Mobile / Touch Viewports) -->
+        <div id="mobileControls" class="mobile-joysticks" aria-label="Mobile touch navigation controls">
+          <div
+            id="moveJoystick"
+            class="joystick-zone joystick-left"
+            role="application"
+            aria-label="Movement joystick"
+            data-testid="move-joystick"
+          >
+            <div class="joystick-base">
+              <span class="joy-tick joy-n" aria-hidden="true"></span>
+              <span class="joy-tick joy-s" aria-hidden="true"></span>
+              <span class="joy-tick joy-w" aria-hidden="true"></span>
+              <span class="joy-tick joy-e" aria-hidden="true"></span>
+              <div id="moveJoystickKnob" class="joystick-knob">
+                <span class="joystick-label mono">MOVE</span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            id="aimJoystick"
+            class="joystick-zone joystick-right"
+            role="application"
+            aria-label="Aim and camera look joystick"
+            data-testid="aim-joystick"
+          >
+            <div class="joystick-base">
+              <span class="joy-tick joy-n" aria-hidden="true"></span>
+              <span class="joy-tick joy-s" aria-hidden="true"></span>
+              <span class="joy-tick joy-w" aria-hidden="true"></span>
+              <span class="joy-tick joy-e" aria-hidden="true"></span>
+              <div id="aimJoystickKnob" class="joystick-knob joystick-knob-aim">
+                <span id="aimJoystickLabel" class="joystick-label mono">AIM</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Transient Toast Notification -->
@@ -296,77 +335,80 @@
             </button>
           </div>
 
-          <!-- Shift Setup Tab -->
-          <div id="rosterPane" class="tab-pane">
-            <!-- Day 1-5 Selector + Chapter Brief -->
-            <div class="setup-section">
-              <div class="setup-head-row mono">
-                <span id="titleDayMeta">Day 1 · Monday</span>
-                <span id="titleBankMeta">Bank $0</span>
+          <!-- Scrollable Setup Body (Keeps Header Tabs & Start Workday Pinned on Every Screen) -->
+          <div class="title-scroll-body">
+            <!-- Shift Setup Tab -->
+            <div id="rosterPane" class="tab-pane">
+              <!-- Day 1-5 Selector + Chapter Brief -->
+              <div class="setup-section">
+                <div class="setup-head-row mono">
+                  <span id="titleDayMeta">Day 1 · Monday</span>
+                  <span id="titleBankMeta">Bank $0</span>
+                </div>
+                <div id="daySelector" class="day-selector" role="group" aria-label="Select workday"></div>
+                <h2 id="titleChapterName" class="chapter-title">The Onboarding Ambush</h2>
+                <p id="titleChapterBrief" class="chapter-brief"></p>
               </div>
-              <div id="daySelector" class="day-selector" role="group" aria-label="Select workday"></div>
-              <h2 id="titleChapterName" class="chapter-title">The Onboarding Ambush</h2>
-              <p id="titleChapterBrief" class="chapter-brief"></p>
-            </div>
 
-            <!-- Difficulty Selector -->
-            <div class="setup-section">
-              <div class="setup-head-row">
-                <span class="setup-label">Difficulty</span>
-                <span id="difficultyTagline" class="setup-sub mono">Balanced · 1.0× salary</span>
+              <!-- Difficulty Selector -->
+              <div class="setup-section">
+                <div class="setup-head-row">
+                  <span class="setup-label">Difficulty</span>
+                  <span id="difficultyTagline" class="setup-sub mono">Balanced · 1.0× salary</span>
+                </div>
+                <div id="difficultySelector" class="diff-selector" role="group" aria-label="Select difficulty"></div>
               </div>
-              <div id="difficultySelector" class="diff-selector" role="group" aria-label="Select difficulty"></div>
-            </div>
 
-            <!-- Employee Roster + Loadout Dossier -->
-            <div class="setup-section">
-              <div id="classGrid" class="class-grid"></div>
-              <div class="hero-dossier">
-                <div class="dossier-top">
-                  <div id="dossierPortrait" class="dossier-portrait" aria-hidden="true"></div>
-                  <div class="dossier-top-copy">
-                    <div class="dossier-head">
-                      <strong id="dossierName">Maya Lin</strong>
-                      <span class="sep" aria-hidden="true">·</span>
-                      <span id="dossierRole">Junior Developer</span>
-                    </div>
-                    <div class="dossier-weapon">
-                      <span class="dossier-label">Weapon</span>
-                      <strong id="dossierWeaponName">Red Stapler</strong>
-                      <button id="dossierSwitchWeaponBtn" type="button" class="dossier-switch-btn mono">
-                        Change
-                      </button>
-                      <span id="dossierWeaponDesc" class="dossier-muted dossier-weapon-desc"></span>
-                    </div>
-                    <div class="dossier-skill">
-                      <span class="dossier-label">Skill</span>
-                      <strong id="dossierSkillName">Stack Overflow Surge</strong>
-                      <span class="sep" aria-hidden="true">·</span>
-                      <span id="dossierSkillDesc" class="dossier-muted"></span>
+              <!-- Employee Roster + Loadout Dossier -->
+              <div class="setup-section">
+                <div id="classGrid" class="class-grid"></div>
+                <div class="hero-dossier">
+                  <div class="dossier-top">
+                    <div id="dossierPortrait" class="dossier-portrait" aria-hidden="true"></div>
+                    <div class="dossier-top-copy">
+                      <div class="dossier-head">
+                        <strong id="dossierName">Maya Lin</strong>
+                        <span class="sep" aria-hidden="true">·</span>
+                        <span id="dossierRole">Junior Developer</span>
+                      </div>
+                      <div class="dossier-weapon">
+                        <span class="dossier-label">Weapon</span>
+                        <strong id="dossierWeaponName">Red Stapler</strong>
+                        <button id="dossierSwitchWeaponBtn" type="button" class="dossier-switch-btn mono">
+                          Change
+                        </button>
+                        <span id="dossierWeaponDesc" class="dossier-muted dossier-weapon-desc"></span>
+                      </div>
+                      <div class="dossier-skill">
+                        <span class="dossier-label">Skill</span>
+                        <strong id="dossierSkillName">Stack Overflow Surge</strong>
+                        <span class="sep" aria-hidden="true">·</span>
+                        <span id="dossierSkillDesc" class="dossier-muted"></span>
+                      </div>
                     </div>
                   </div>
+                  <div id="effectiveStatsStrip" class="effective-stats mono"></div>
                 </div>
-                <div id="effectiveStatsStrip" class="effective-stats mono"></div>
               </div>
             </div>
-          </div>
 
-          <!-- Office Arsenal Tab (10 Selectable Office-Item Weapons) -->
-          <div id="arsenalPane" class="tab-pane" hidden>
-            <div id="arsenalSelectedBar" class="arsenal-selected-bar"></div>
-            <div id="weaponGrid" class="weapon-grid" role="group" aria-label="Select office item weapon"></div>
-          </div>
-
-          <!-- Upgrades Tab -->
-          <div id="shopPane" class="tab-pane" hidden>
-            <div class="shop-summary">
-              <span>Available Salary</span>
-              <strong id="shopBankText" class="mono">$0</strong>
+            <!-- Office Arsenal Tab (10 Selectable Office-Item Weapons) -->
+            <div id="arsenalPane" class="tab-pane" hidden>
+              <div id="arsenalSelectedBar" class="arsenal-selected-bar"></div>
+              <div id="weaponGrid" class="weapon-grid" role="group" aria-label="Select office item weapon"></div>
             </div>
-            <div id="shopGrid" class="shop-grid"></div>
+
+            <!-- Upgrades Tab -->
+            <div id="shopPane" class="tab-pane" hidden>
+              <div class="shop-summary">
+                <span>Available Salary</span>
+                <strong id="shopBankText" class="mono">$0</strong>
+              </div>
+              <div id="shopGrid" class="shop-grid"></div>
+            </div>
           </div>
 
-          <!-- Primary Menu Actions -->
+          <!-- Primary Menu Actions (Always Pinned & Never Cut Off on Mobile) -->
           <div class="title-actions">
             <button id="startButton" type="button" class="btn-primary" data-start="true">
               Start Workday

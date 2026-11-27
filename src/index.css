@@ -29,8 +29,10 @@ html,
 body {
   width: 100%;
   height: 100%;
+  height: 100dvh;
   margin: 0;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg-deep);
   color: var(--ink);
   font-family: var(--font-body);
@@ -64,7 +66,9 @@ input:focus-visible {
 .game-shell {
   position: relative;
   width: 100vw;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg-deep);
 }
@@ -847,7 +851,8 @@ body:not([data-state="title"]) .title-screen {
 .title-panel {
   width: min(468px, 100%);
   max-height: calc(100vh - 40px);
-  overflow-y: auto;
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
   padding: 18px 20px;
   border-radius: 14px;
   background: var(--surface-strong);
@@ -864,6 +869,16 @@ body:not([data-state="title"]) .title-screen {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-shrink: 0;
+}
+
+.title-scroll-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 
 .title-head-actions {
@@ -890,6 +905,7 @@ body:not([data-state="title"]) .title-screen {
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(148, 163, 184, 0.14);
+  flex-shrink: 0;
 }
 
 .settings-tabs {
@@ -1399,11 +1415,14 @@ body:not([data-state="title"]) .title-screen {
 .title-actions {
   display: flex;
   gap: 10px;
-  padding-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  flex-shrink: 0;
 }
 
 .btn-primary {
   flex: 1;
+  min-height: 46px;
   padding: 12px 18px;
   border-radius: 9px;
   background: var(--accent);
@@ -1974,17 +1993,158 @@ body:not([data-state="title"]) .title-screen {
   color: #fde68a;
 }
 
+/* ==================== MOBILE VIRTUAL JOYSTICKS ==================== */
+.mobile-joysticks {
+  display: none;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.joystick-zone {
+  position: absolute;
+  bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
+  width: 118px;
+  height: 118px;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.joystick-left {
+  left: max(14px, env(safe-area-inset-left));
+}
+
+.joystick-right {
+  right: max(14px, env(safe-area-inset-right));
+}
+
+.joystick-base {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 999px;
+  background: rgba(12, 18, 28, 0.64);
+  border: 1.5px solid rgba(148, 163, 184, 0.36);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: grid;
+  place-items: center;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.joystick-left.is-active .joystick-base {
+  background: rgba(15, 28, 36, 0.78);
+  border-color: rgba(40, 184, 157, 0.85);
+}
+
+.joystick-right.is-active .joystick-base {
+  background: rgba(30, 24, 16, 0.78);
+  border-color: rgba(245, 158, 11, 0.88);
+}
+
+.joy-tick {
+  position: absolute;
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.joy-n {
+  top: 7px;
+  left: 50%;
+  width: 3px;
+  height: 8px;
+  transform: translateX(-50%);
+}
+
+.joy-s {
+  bottom: 7px;
+  left: 50%;
+  width: 3px;
+  height: 8px;
+  transform: translateX(-50%);
+}
+
+.joy-w {
+  left: 7px;
+  top: 50%;
+  width: 8px;
+  height: 3px;
+  transform: translateY(-50%);
+}
+
+.joy-e {
+  right: 7px;
+  top: 50%;
+  width: 8px;
+  height: 3px;
+  transform: translateY(-50%);
+}
+
+.joystick-knob {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: rgba(24, 38, 56, 0.96);
+  border: 2px solid var(--accent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.58);
+  display: grid;
+  place-items: center;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.joystick-knob-aim {
+  border-color: var(--amber);
+}
+
+.joystick-left.is-active .joystick-knob {
+  background: rgba(40, 184, 157, 0.28);
+}
+
+.joystick-right.is-active .joystick-knob {
+  background: rgba(245, 158, 11, 0.28);
+}
+
+.joystick-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f1f5f9;
+  pointer-events: none;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  body[data-state="playing"] .mobile-joysticks {
+    display: block;
+  }
+
+  .skill-key {
+    display: none;
+  }
+}
+
 @media (max-width: 860px) {
   .title-screen {
-    padding: 12px;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
     align-items: flex-end;
-    background: linear-gradient(180deg, transparent 0%, rgba(9, 14, 22, 0.92) 52%);
+    background: linear-gradient(180deg, transparent 0%, rgba(9, 14, 22, 0.92) 48%);
   }
 
   .title-panel {
     width: 100%;
-    max-height: 76vh;
-    padding: 14px;
+    max-height: min(82dvh, calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    padding: 12px 13px;
+    gap: 9px;
+  }
+
+  .title-svg {
+    max-height: 44px;
   }
 
   .title-controls-hint {
@@ -1992,13 +2152,13 @@ body:not([data-state="title"]) .title-screen {
   }
 
   .hud-top-left {
-    top: 10px;
+    top: max(10px, env(safe-area-inset-top));
     left: 10px;
-    width: 174px;
+    width: 168px;
     padding: 6px 8px;
   }
 
-  .hud-hero-row {
+  .hud-hero-wrap {
     gap: 6px;
   }
 
@@ -2010,19 +2170,20 @@ body:not([data-state="title"]) .title-screen {
     font-size: 11px;
   }
 
-  .hud-energy-track {
+  .bar-track {
     height: 7px;
+    margin-top: 5px;
   }
 
   .hud-top-right {
-    top: 10px;
+    top: max(10px, env(safe-area-inset-top));
     right: 10px;
     gap: 5px;
   }
 
   .hud-salary-cluster {
-    min-width: 58px;
-    padding: 6px 8px;
+    min-width: 56px;
+    padding: 5px 8px;
   }
 
   .hud-salary-num {
@@ -2030,9 +2191,9 @@ body:not([data-state="title"]) .title-screen {
   }
 
   .util-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 10.5px;
+    width: 36px;
+    height: 36px;
+    font-size: 11px;
   }
 
   .hud-micro-stats {
@@ -2045,7 +2206,7 @@ body:not([data-state="title"]) .title-screen {
   }
 
   .hud-center-stack {
-    top: 74px;
+    top: calc(max(10px, env(safe-area-inset-top)) + 72px);
   }
 
   .hud-clock-cluster {
@@ -2061,15 +2222,51 @@ body:not([data-state="title"]) .title-screen {
     font-size: 15px;
   }
 
+  /* Position mobile action dock cleanly above the dual joysticks with zero overlap */
+  .hud-bottom-center {
+    bottom: max(138px, calc(env(safe-area-inset-bottom) + 134px));
+    width: calc(100vw - 24px);
+  }
+
   .action-dock {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: center;
-    max-width: calc(100vw - 24px);
+    gap: 8px;
+    max-width: 100%;
   }
 
   .skill-slot {
-    min-width: 142px;
-    padding: 8px 10px 11px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 12px 10px;
+    gap: 6px;
+  }
+
+  .dodge-slot {
+    min-width: 92px;
+  }
+
+  .perk-claim-slot {
+    min-width: 108px;
+  }
+
+  .skill-info {
+    gap: 6px;
+  }
+
+  .skill-info strong {
+    font-size: 12.5px;
+  }
+
+  .skill-info span {
+    font-size: 10.5px;
+  }
+
+  .comms-card {
+    bottom: max(192px, calc(env(safe-area-inset-bottom) + 188px));
+    left: 12px;
+    width: min(336px, calc(100vw - 24px));
+    padding: 10px 12px;
   }
 
   .choice-grid-3,
@@ -2110,3 +2307,66 @@ body:not([data-state="title"]) .title-screen {
     line-height: 1.35;
   }
 }
+
+@media (max-width: 400px) {
+  .joystick-zone {
+    width: 104px;
+    height: 104px;
+  }
+
+  .joystick-base {
+    width: 96px;
+    height: 96px;
+  }
+
+  .joystick-knob {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hud-bottom-center {
+    bottom: max(126px, calc(env(safe-area-inset-bottom) + 122px));
+  }
+
+  .title-actions {
+    gap: 8px;
+  }
+
+  .btn-ghost {
+    padding: 10px 11px;
+    font-size: 12px;
+  }
+}
+
+@media (max-height: 680px) {
+  .title-screen {
+    padding: max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom));
+  }
+
+  .title-panel {
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .title-svg {
+    max-height: 38px;
+  }
+}
+
+@media (max-height: 500px) and (max-width: 920px) {
+  /* Mobile landscape: tuck compact action buttons cleanly between the left & right joysticks */
+  .hud-bottom-center {
+    bottom: max(14px, calc(env(safe-area-inset-bottom) + 10px));
+    width: auto;
+  }
+
+  .hud-center-stack {
+    top: max(10px, env(safe-area-inset-top));
+  }
+
+  .comms-card {
+    bottom: max(132px, calc(env(safe-area-inset-bottom) + 126px));
+  }
+}
+

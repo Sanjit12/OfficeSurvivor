@@ -36,6 +36,8 @@ import type {
 } from "./game/types";
 import { WorldRenderer } from "./scene/worldRenderer";
 import { HudController } from "./ui/hudController";
+import { TouchJoystickController } from "./ui/touchJoysticks";
+import { combineMoveVectors, computeFpsStickLookDelta } from "./game/joystick";
 
 const mount = document.getElementById("canvasMount")!;
 let save = loadSaveFromStorage(window.localStorage);
@@ -61,6 +63,8 @@ let titleDragLastX = 0;
 let fpsDragActive = false;
 let fpsDragLastX = 0;
 let fpsDragLastY = 0;
+
+const joysticks = new TouchJoystickController(() => sound.unlock());
 
 function exitPointerLockSafe(): void {
   try {
@@ -89,6 +93,7 @@ function clearInputs(): void {
   fpsDragActive = false;
   dodgeBufferTimer = 0;
   skillBufferTimer = 0;
+  joysticks.reset();
 }
 
 function toggleCameraViewMode(): void {
@@ -761,22 +766,36 @@ renderer.startLoop((dt) => {
     let aimWorldZ = 0;
     let aimActive = false;
 
+    const moveJoy = joysticks.getMoveVector();
+    const aimJoy = joysticks.getAimVector();
+    joysticks.setFpsMode(isFps);
+
     if (isFps) {
-      // Smooth keyboard turning via Left/Right Arrows (when not bound to strafe)
+      // Smooth keyboard turning via Left/Right Arrows + Right Virtual Joystick Look
       const turnInput =
         (heldKeys.has("arrowleft") && b.moveLeft !== "arrowleft" ? 1 : 0) -
         (heldKeys.has("arrowright") && b.moveRight !== "arrowright" ? 1 : 0);
       if (turnInput !== 0) {
         renderer.rotateFpsLook(turnInput * 2.25 * settings.camera.mouseSensitivity * dt, 0);
       }
+      if (aimJoy.active) {
+        const delta = computeFpsStickLookDelta(
+          aimJoy.x,
+          aimJoy.y,
+          settings.camera.mouseSensitivity,
+          dt
+        );
+        renderer.rotateFpsLook(delta.dYaw, delta.dPitch);
+      }
 
-      const forwardInput =
+      const kbForward =
         (heldKeys.has(b.moveUp) || heldKeys.has("arrowup") ? 1 : 0) -
         (heldKeys.has(b.moveDown) || heldKeys.has("arrowdown") ? 1 : 0);
-      const strafeInput =
+      const kbStrafe =
         (heldKeys.has(b.moveRight) ? 1 : 0) - (heldKeys.has(b.moveLeft) ? 1 : 0);
+      const combinedFps = combineMoveVectors(kbStrafe, -kbForward, moveJoy.x, moveJoy.y);
       const look = renderer.getFpsLook();
-      const vec = computeFpsMoveVector(forwardInput, strafeInput, look.yaw);
+      const vec = computeFpsMoveVector(-combinedFps.moveZ, combinedFps.moveX, look.yaw);
       moveX = vec.moveX;
       moveZ = vec.moveZ;
 
@@ -784,6 +803,7 @@ renderer.startLoop((dt) => {
       const lockedOrManual =
         settings.gameplay.aimMode === "manual" ||
         pointerDown ||
+        aimJoy.active ||
         document.pointerLockElement === canvasEl;
       if (lockedOrManual) {
         aimActive = true;
@@ -792,15 +812,22 @@ renderer.startLoop((dt) => {
       }
       renderer.setAimReticle(false, 0, 0);
     } else {
-      moveX =
+      const kbX =
         (heldKeys.has(b.moveRight) || heldKeys.has("arrowright") ? 1 : 0) -
         (heldKeys.has(b.moveLeft) || heldKeys.has("arrowleft") ? 1 : 0);
-      moveZ =
+      const kbZ =
         (heldKeys.has(b.moveDown) || heldKeys.has("arrowdown") ? 1 : 0) -
         (heldKeys.has(b.moveUp) || heldKeys.has("arrowup") ? 1 : 0);
+      const combined = combineMoveVectors(kbX, kbZ, moveJoy.x, moveJoy.y);
+      moveX = combined.moveX;
+      moveZ = combined.moveZ;
 
       const manualMode = settings.gameplay.aimMode === "manual";
-      if ((manualMode && pointerHasMoved) || pointerDown) {
+      if (aimJoy.active) {
+        aimActive = true;
+        aimWorldX = game.player.x + aimJoy.x * 10;
+        aimWorldZ = game.player.z + aimJoy.y * 10;
+      } else if ((manualMode && pointerHasMoved) || pointerDown) {
         const worldPt = renderer.screenToWorld(pointerClientX, pointerClientY);
         if (worldPt) {
           aimActive = true;
@@ -808,7 +835,7 @@ renderer.startLoop((dt) => {
           aimWorldZ = worldPt.z;
         }
       }
-      renderer.setAimReticle(aimActive && (manualMode || pointerDown), aimWorldX, aimWorldZ);
+      renderer.setAimReticle(aimActive && (manualMode || pointerDown || aimJoy.active), aimWorldX, aimWorldZ);
     }
 
     const input: InputSnapshot = {
