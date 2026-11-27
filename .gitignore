@@ -1,6 +1,12 @@
 node_modules/
 dist/
 .wrangler/
+.aistudio/
+.verify/
+coverage/
 .env
 .env.local
+.env.*.local
+*.log
 .DS_Store
+Thumbs.db

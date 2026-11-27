@@ -1,0 +1,37 @@
+name: Bug Report
+description: Report a gameplay bug, visual issue, or crash in Office Survivor
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Share the exact steps to trigger the issue.
+      placeholder: |
+        1. Select employee / weapon / floor
+        2. Start workday
+        3. Trigger ...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser & OS
+      placeholder: "e.g., Chrome 131 on macOS 15"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console errors or screenshots
+      description: Paste any browser console errors or drag screenshots here.
+    validations:
+      required: false
